@@ -865,7 +865,7 @@ if submit_button and query:
     
     # Display loading state
     loading_placeholder = st.empty()
-    loading_placeholder.markdown('<div class="loading-indicator">Thinking...</div>', unsafe_allow_html=True)
+    loading_placeholder.markdown('<div class="loading-indicator">Checking archives...</div>', unsafe_allow_html=True)
     
     # Search for relevant segments
     relevant_segments = []
