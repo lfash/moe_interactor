@@ -405,8 +405,8 @@ def format_citation(segment_id, segment_title, segment_type="Live Session"):
     
     return f"{segment_type} {segment_id}, Foundations Course, 2025"
 
-# Function to determine the most relevant module
-def get_most_relevant_module(relevant_segments):
+# Function to search for relevant segments
+def search_segments(query, index, segments_metadata, vectorizer, limit=5):
     if not relevant_segments or len(relevant_segments) == 0:
         return None
     
@@ -450,9 +450,25 @@ def get_most_relevant_module(relevant_segments):
     
     return best_module
 
-# Load the FAISS index, vectorizer, and segment metadata
+# Load the module video information
 @st.cache_resource(show_spinner=False)
-def load_faiss_resources(vector_db_dir="vector_db"):
+def load_module_videos(file_path="module_videos.json"):
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else:
+            # Default mapping if file doesn't exist
+            return {
+                "Live Session 1": {
+                    "thumbnail": "https://i.imgur.com/yTqsldK.png",
+                    "purchase_url": "https://the-center.circle.so/c/foundations-self-study",
+                    "title": "Foundations Course"
+                }
+            }
+    except Exception as e:
+        st.error(f"Error loading module videos: {e}")
+        return {}
     index_path = os.path.join(vector_db_dir, "course_segments.index")
     metadata_path = os.path.join(vector_db_dir, "segments_metadata.json")
     vectorizer_path = os.path.join(vector_db_dir, "vectorizer.pkl")
@@ -471,8 +487,9 @@ def load_faiss_resources(vector_db_dir="vector_db"):
     
     return index, segments_metadata, vectorizer
 
-# Function to search for relevant segments
-def search_segments(query, index, segments_metadata, vectorizer, limit=5):
+# Load the FAISS index, vectorizer, and segment metadata
+@st.cache_resource(show_spinner=False)
+def load_faiss_resources(vector_db_dir="vectordb"):
     if index is None or segments_metadata is None or vectorizer is None:
         st.error("Vector database resources not loaded properly")
         return []
@@ -675,17 +692,20 @@ st.markdown('</div>', unsafe_allow_html=True)
 try:
     if "resources_loaded" not in st.session_state:
         index, segments_metadata, vectorizer = load_faiss_resources()
+        module_videos = load_module_videos()
         st.session_state.index = index
         st.session_state.segments_metadata = segments_metadata
         st.session_state.vectorizer = vectorizer
+        st.session_state.module_videos = module_videos
         st.session_state.resources_loaded = True
     else:
         index = st.session_state.index
         segments_metadata = st.session_state.segments_metadata
         vectorizer = st.session_state.vectorizer
+        module_videos = st.session_state.module_videos
 except Exception as e:
     st.error(f"Error loading resources: {e}")
-    index, segments_metadata, vectorizer = None, None, None
+    index, segments_metadata, vectorizer, module_videos = None, None, None, {}
 
 # Display current question and response
 if st.session_state.current_query and st.session_state.current_response:
@@ -704,10 +724,27 @@ if st.session_state.current_query and st.session_state.current_response:
     if st.session_state.current_module:
         module_container = st.container()
         with module_container:
-            module_container.markdown('''
+            # Get video information from the module
+            module_type = st.session_state.current_module.get("type", "")
+            module_num = st.session_state.current_module.get("module", "")
+            module_title = st.session_state.current_module.get("video_title", "Foundations Course")
+            
+            # Get purchase URL and thumbnail with fallbacks
+            purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
+            thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/yTqsldK.png")
+            
+            # Build the module display with a clickable thumbnail
+            module_container.markdown(f'''
             <div class="module-highlight">
-                <div class="module-title">Listen to Bree:</div>
-                <img src="https://i.imgur.com/yTqsldK.png" alt="Bree Greenberg" style="max-width: 100%;">
+                <div class="module-title">Listen to Bree: {module_title}</div>
+                <a href="{purchase_url}" target="_blank">
+                    <img src="{thumbnail}" alt="Bree Greenberg - {module_type} {module_num}" style="max-width: 100%;">
+                </a>
+                <div style="text-align: center; margin-top: 0.5rem;">
+                    <a href="{purchase_url}" target="_blank" style="color: #317485; text-decoration: none;">
+                        Access this module →
+                    </a>
+                </div>
             </div>
             ''', unsafe_allow_html=True)
 
@@ -715,7 +752,7 @@ if st.session_state.current_query and st.session_state.current_response:
 if not st.session_state.in_chat:
     # Initial state with centered input
     st.markdown('<div class="empty-state-container">', unsafe_allow_html=True)
-    st.markdown('<p class="initial-prompt">What would you like to play with?</p>', unsafe_allow_html=True)
+    st.markdown('<p class="initial-prompt">What would you like to know?</p>', unsafe_allow_html=True)
     
     with st.form(key="query_form_initial", clear_on_submit=True):
         col1, col2 = st.columns([10, 1])
@@ -760,7 +797,7 @@ if submit_button and query:
     response = generate_response(query, relevant_segments, conversation_history)
     
     # Determine most relevant module
-    most_relevant_module = get_most_relevant_module(relevant_segments)
+    most_relevant_module = get_most_relevant_module(relevant_segments, module_videos)
     
     # Store results in session state
     st.session_state.current_response = response
