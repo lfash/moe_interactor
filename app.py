@@ -1,4 +1,4 @@
-import os
+simport os
 import streamlit as st
 import anthropic
 import faiss
@@ -781,7 +781,7 @@ try:
         # Retrieve from session state
         index = st.session_state.index
         segments_metadata = st.session_state.segments_metadata
-        vectorizer = st.session_state.vector
+        vectorizer = st.session_state.vectorizer
         index = st.session_state.index
         segments_metadata = st.session_state.segments_metadata
         vectorizer = st.session_state.vectorizer
