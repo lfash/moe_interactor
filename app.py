@@ -171,14 +171,12 @@ st.markdown(
         transition: background-color 0.3s !important;
     }
     
-    /* Button hover styles - override Streamlit's default red hover */
-    .stButton > button:hover,
-    .stForm button:hover,
-    button[kind="formSubmit"]:hover,
-    button[kind="primary"]:hover,
-    [data-testid="stFormSubmitButton"] button:hover {
-        background-color: #3b8a9d !important; /* Lighter shade of the accent blue */
-        border-color: #3b8a9d !important;
+    /* Override Streamlit's loading state stylings too */
+    .stApp [data-testid="stFormSubmitButton"] [data-baseweb="button"][aria-disabled="true"],
+    .stApp button[disabled],
+    .stApp [data-baseweb="button"][disabled] {
+        background-color: #317485 !important;
+        opacity: 0.7;
         color: white !important;
     }
     
@@ -222,9 +220,11 @@ st.markdown(
         font-size: 1.2rem;
         margin-bottom: 0.5rem;
     }
+    /* Loading indicator */
     .loading-indicator {
         color: #317485;
         font-style: italic;
+        margin: 1rem 0;
     }
     
     /* New chat button */
@@ -264,6 +264,25 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Debug API key (only show length for security)
+try:
+    anthropic_api_key = st.secrets["ANTHROPIC_API_KEY"]
+    st.sidebar.write("API key found, length:", len(anthropic_api_key))
+    # Show first and last few characters to verify it's correct without revealing the full key
+    st.sidebar.write("API key starts with:", anthropic_api_key[:7] + "..." + anthropic_api_key[-4:])
+except Exception as e:
+    st.sidebar.write("Error accessing API key:", str(e))
+
+# Debug: Print directory information
+import os
+st.sidebar.write("Current working directory:", os.getcwd())
+st.sidebar.write("Files in directory:", os.listdir())
+st.sidebar.write("Vectordb exists:", os.path.exists("vectordb"))
+if os.path.exists("vectordb"):
+    st.sidebar.write("Files in vectordb:", os.listdir("vectordb"))
+else:
+    st.sidebar.write("Vectordb directory not found!")
+
 # Process text to format citations
 def format_citations_html(text):
     # Find any numbered citations at the end of the text
@@ -286,10 +305,8 @@ def format_citations_html(text):
     return text
 
 # Initialize API clients
-anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-
-# Initialize Anthropic client
 try:
+    anthropic_api_key = st.secrets["ANTHROPIC_API_KEY"]
     anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
 except Exception as e:
     st.error(f"Error connecting to Claude API: {e}")
@@ -405,10 +422,92 @@ def format_citation(segment_id, segment_title, segment_type="Live Session"):
     
     return f"{segment_type} {segment_id}, Foundations Course, 2025"
 
+# Load the module video information
+@st.cache_resource(show_spinner=False)
+def load_module_videos(file_path="module_videos.json"):
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else:
+            # Default mapping if file doesn't exist
+            return {
+                "Live Session 1": {
+                    "thumbnail": "https://i.imgur.com/yTqsldK.png",
+                    "purchase_url": "https://the-center.circle.so/c/foundations-self-study",
+                    "title": "Foundations Course"
+                }
+            }
+    except Exception as e:
+        st.error(f"Error loading module videos: {e}")
+        return {}
+
+# Load the FAISS index, vectorizer, and segment metadata
+@st.cache_resource(show_spinner=False)
+def load_faiss_resources(vector_db_dir="vectordb"):
+    index_path = os.path.join(vector_db_dir, "course_segments.index")
+    metadata_path = os.path.join(vector_db_dir, "segments_metadata.json")
+    vectorizer_path = os.path.join(vector_db_dir, "vectorizer.pkl")
+    
+    if not os.path.exists(index_path) or not os.path.exists(metadata_path) or not os.path.exists(vectorizer_path):
+        st.error(f"Vector database files not found in {vector_db_dir}")
+        return None, None, None
+    
+    try:
+        index = faiss.read_index(index_path)
+        
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            segments_metadata = json.load(f)
+        
+        with open(vectorizer_path, "rb") as f:
+            vectorizer = pickle.load(f)
+        
+        return index, segments_metadata, vectorizer
+    except Exception as e:
+        st.error(f"Error loading vector database files: {e}")
+        return None, None, None
+
 # Function to search for relevant segments
 def search_segments(query, index, segments_metadata, vectorizer, limit=5):
+    if index is None or segments_metadata is None or vectorizer is None:
+        st.error("Vector database resources not loaded properly")
+        return []
+    
+    try:
+        clean_query = clean_text(query)
+        query_vector = vectorizer.transform([clean_query]).toarray().astype('float32')
+        distances, indices = index.search(query_vector, limit)
+        
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx != -1 and idx < len(segments_metadata):
+                segment = segments_metadata[idx]
+                segment_content = correct_names(segment["content"])
+                
+                results.append({
+                    "content": segment_content,
+                    "session_title": segment["session_title"],
+                    "title": segment["title"],
+                    "session_type": segment.get("session_type", "Unknown Type"),
+                    "session_number": segment.get("session_number", 0),
+                    "module_number": segment.get("module_number", 0),
+                    "segment_number": segment["segment_number"],
+                    "segment_id": segment["segment_id"],
+                    "similarity_score": float(1.0 / (1.0 + distances[0][i]))
+                })
+        
+        return results
+    except Exception as e:
+        st.error(f"Error during search: {e}")
+        return []
+
+# Function to determine the most relevant module
+def get_most_relevant_module(relevant_segments, module_videos=None):
     if not relevant_segments or len(relevant_segments) == 0:
         return None
+    
+    if module_videos is None:
+        module_videos = {}
     
     module_scores = {}
     
@@ -448,79 +547,15 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
             best_score = avg_score
             best_module = data
     
+    # Add video information if available
+    if best_module:
+        module_key = f"{best_module['type']} {best_module['module']}"
+        if module_key in module_videos:
+            best_module["video_thumbnail"] = module_videos[module_key].get("thumbnail")
+            best_module["purchase_url"] = module_videos[module_key].get("purchase_url")
+            best_module["video_title"] = module_videos[module_key].get("title")
+    
     return best_module
-
-# Load the module video information
-@st.cache_resource(show_spinner=False)
-def load_module_videos(file_path="module_videos.json"):
-    try:
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        else:
-            # Default mapping if file doesn't exist
-            return {
-                "Live Session 1": {
-                    "thumbnail": "https://i.imgur.com/yTqsldK.png",
-                    "purchase_url": "https://the-center.circle.so/c/foundations-self-study",
-                    "title": "Foundations Course"
-                }
-            }
-    except Exception as e:
-        st.error(f"Error loading module videos: {e}")
-        return {}
-    index_path = os.path.join(vector_db_dir, "course_segments.index")
-    metadata_path = os.path.join(vector_db_dir, "segments_metadata.json")
-    vectorizer_path = os.path.join(vector_db_dir, "vectorizer.pkl")
-    
-    if not os.path.exists(index_path) or not os.path.exists(metadata_path) or not os.path.exists(vectorizer_path):
-        st.error(f"Vector database files not found in {vector_db_dir}")
-        return None, None, None
-    
-    index = faiss.read_index(index_path)
-    
-    with open(metadata_path, "r", encoding="utf-8") as f:
-        segments_metadata = json.load(f)
-    
-    with open(vectorizer_path, "rb") as f:
-        vectorizer = pickle.load(f)
-    
-    return index, segments_metadata, vectorizer
-
-# Load the FAISS index, vectorizer, and segment metadata
-@st.cache_resource(show_spinner=False)
-def load_faiss_resources(vector_db_dir="vectordb"):
-    if index is None or segments_metadata is None or vectorizer is None:
-        st.error("Vector database resources not loaded properly")
-        return []
-    
-    try:
-        clean_query = clean_text(query)
-        query_vector = vectorizer.transform([clean_query]).toarray().astype('float32')
-        distances, indices = index.search(query_vector, limit)
-        
-        results = []
-        for i, idx in enumerate(indices[0]):
-            if idx != -1 and idx < len(segments_metadata):
-                segment = segments_metadata[idx]
-                segment_content = correct_names(segment["content"])
-                
-                results.append({
-                    "content": segment_content,
-                    "session_title": segment["session_title"],
-                    "title": segment["title"],
-                    "session_type": segment.get("session_type", "Unknown Type"),
-                    "session_number": segment.get("session_number", 0),
-                    "module_number": segment.get("module_number", 0),
-                    "segment_number": segment["segment_number"],
-                    "segment_id": segment["segment_id"],
-                    "similarity_score": float(1.0 / (1.0 + distances[0][i]))
-                })
-        
-        return results
-    except Exception as e:
-        st.error(f"Error during search: {e}")
-        return []
 
 # Function to generate a response with Claude
 def generate_response(query, relevant_segments, conversation_history=None):
@@ -687,6 +722,9 @@ if st.session_state.in_chat:
         st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+# Initialize variables to avoid "not defined" errors
+index, segments_metadata, vectorizer, module_videos = None, None, None, {}
 
 # Load resources
 try:
