@@ -100,18 +100,23 @@ st.markdown(
         z-index: 999;
     }
     .app-title {
-        font-family: 'Futura', 'Trebuchet MS', sans-serif;
-        color: white;
-        font-size: 1.5rem;
-        font-weight: normal;
-        margin-bottom: 0.2rem;
-    }
-    .app-subtitle {
-        font-family: 'Futura', 'Trebuchet MS', sans-serif;
-        color: #ccc;
-        font-size: 0.9rem;
-        margin-top: 0;
-    }
+    font-family: 'Futura', 'Trebuchet MS', sans-serif !important;
+    color: white !important;
+    font-size: 1.5rem !important;
+    font-weight: 300 !important; /* Changed from normal to 300 for lighter weight */
+    margin-bottom: 0.2rem !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+}
+.app-subtitle {
+    font-family: 'Futura', 'Trebuchet MS', sans-serif !important;
+    color: #ccc !important;
+    font-size: 0.9rem !important;
+    font-weight: 300 !important;
+    margin-top: 0 !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+}
     
     /* Message styling */
     .message-container { margin-bottom: 1.5rem; font-family: Arial, sans-serif; }
@@ -746,7 +751,7 @@ if "conversation" not in st.session_state:
 
 # Sticky header with title
 st.markdown('<div class="app-header">', unsafe_allow_html=True)
-st.markdown('<h1 class="app-title">Understanding Foundations</h1>', unsafe_allow_html=True)
+st.markdown('<div class="app-title">Understanding Foundations</div>', unsafe_allow_html=True)
 st.markdown('<p class="app-subtitle">Bree Greenberg, LMFT (2025)</p>', unsafe_allow_html=True)
 
 # Only show New Chat button if a conversation is in progress
