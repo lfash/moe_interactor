@@ -1,2 +1,0 @@
-Model: TF-IDF Vectorizer
-Embedding dimension: 1536
