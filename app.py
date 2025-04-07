@@ -752,7 +752,7 @@ if st.session_state.current_query and st.session_state.current_response:
 if not st.session_state.in_chat:
     # Initial state with centered input
     st.markdown('<div class="empty-state-container">', unsafe_allow_html=True)
-    st.markdown('<p class="initial-prompt">Let's play. What's your question?</p>', unsafe_allow_html=True)
+    st.markdown("<p class="initial-prompt">Let's play. What's your question?</p>", unsafe_allow_html=True)
     
     with st.form(key="query_form_initial", clear_on_submit=True):
         col1, col2 = st.columns([10, 1])
