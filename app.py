@@ -272,9 +272,9 @@ try:
     st.sidebar.write("API key starts with:", anthropic_api_key[:7] + "..." + anthropic_api_key[-4:])
 except Exception as e:
     st.sidebar.write("Error accessing API key:", str(e))
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Debug: Print directory information
-import os
 st.sidebar.write("Current working directory:", os.getcwd())
 st.sidebar.write("Files in directory:", os.listdir())
 st.sidebar.write("Vectordb exists:", os.path.exists("vectordb"))
@@ -306,7 +306,8 @@ def format_citations_html(text):
 
 # Initialize API clients
 try:
-    anthropic_api_key = st.secrets["ANTHROPIC_API_KEY"]
+    # Try to get API key from secrets first, then fall back to env vars
+    anthropic_api_key = st.secrets.get("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY"))
     anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
 except Exception as e:
     st.error(f"Error connecting to Claude API: {e}")
@@ -731,19 +732,25 @@ try:
     if "resources_loaded" not in st.session_state:
         index, segments_metadata, vectorizer = load_faiss_resources()
         module_videos = load_module_videos()
-        st.session_state.index = index
-        st.session_state.segments_metadata = segments_metadata
-        st.session_state.vectorizer = vectorizer
-        st.session_state.module_videos = module_videos
-        st.session_state.resources_loaded = True
+        
+        # Only save to session state if successfully loaded
+        if index is not None and segments_metadata is not None and vectorizer is not None:
+            st.session_state.index = index
+            st.session_state.segments_metadata = segments_metadata
+            st.session_state.vectorizer = vectorizer
+            st.session_state.module_videos = module_videos
+            st.session_state.resources_loaded = True
     else:
+        # Retrieve from session state
+        index = st.session_state.index
+        segments_metadata = st.session_state.segments_metadata
+        vectorizer = st.session_state.vector
         index = st.session_state.index
         segments_metadata = st.session_state.segments_metadata
         vectorizer = st.session_state.vectorizer
         module_videos = st.session_state.module_videos
 except Exception as e:
     st.error(f"Error loading resources: {e}")
-    index, segments_metadata, vectorizer, module_videos = None, None, None, {}
 
 # Display current question and response
 if st.session_state.current_query and st.session_state.current_response:
@@ -790,7 +797,7 @@ if st.session_state.current_query and st.session_state.current_response:
 if not st.session_state.in_chat:
     # Initial state with centered input
     st.markdown('<div class="empty-state-container">', unsafe_allow_html=True)
-    st.markdown('<p class="initial-prompt">What would you like to play with?</p>', unsafe_allow_html=True)
+    st.markdown('<p class="initial-prompt">What would you like to know?</p>', unsafe_allow_html=True)
     
     with st.form(key="query_form_initial", clear_on_submit=True):
         col1, col2 = st.columns([10, 1])
