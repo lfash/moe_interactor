@@ -20,6 +20,43 @@ st.set_page_config(
     layout="wide"
 )
 
+@st.cache_resource(show_spinner=False)
+def load_faiss_resources(vectordb_dir="vectordb"):
+    # Get the absolute path to the script directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Construct absolute path to vector_db
+    vectordb_path = os.path.join(script_dir, vectordb_dir)
+    
+    # Debug output
+    st.sidebar.write(f"Looking for files in: {vectordb_path}")
+    
+    index_path = os.path.join(vectordb_path, "course_segments.index")
+    metadata_path = os.path.join(vectordb_path, "segments_metadata.json")
+    vectorizer_path = os.path.join(vectordb_path, "vectorizer.pkl")
+    
+    # Check if each file exists
+    st.sidebar.write(f"index_path exists: {os.path.exists(index_path)}")
+    st.sidebar.write(f"metadata_path exists: {os.path.exists(metadata_path)}")
+    st.sidebar.write(f"vectorizer_path exists: {os.path.exists(vectorizer_path)}")
+    
+    if not os.path.exists(index_path) or not os.path.exists(metadata_path) or not os.path.exists(vectorizer_path):
+        st.error(f"Vector database files not found in {vectordb_path}")
+        return None, None, None
+
+# Check various possible locations
+possible_paths = [
+    "vectordb",
+    "./vectordb",
+    "../vectordb",
+    os.path.join(os.getcwd(), "vectordb")
+]
+
+for path in possible_paths:
+    st.sidebar.write(f"Checking {path} exists: {os.path.exists(path)}")
+    if os.path.exists(path):
+        st.sidebar.write(f"Files in {path}: {os.listdir(path)}")
+
 # Custom CSS for UI styling
 st.markdown(
     """
@@ -277,11 +314,11 @@ except Exception as e:
 # Debug: Print directory information
 st.sidebar.write("Current working directory:", os.getcwd())
 st.sidebar.write("Files in directory:", os.listdir())
-st.sidebar.write("Vector_db exists:", os.path.exists("vector_db"))
-if os.path.exists("vector_db"):
-    st.sidebar.write("Files in vector_db:", os.listdir("vector_db"))
+st.sidebar.write("Vectordb exists:", os.path.exists("vectordb"))
+if os.path.exists("vectordb"):
+    st.sidebar.write("Files in vectordb:", os.listdir("vectordb"))
 else:
-    st.sidebar.write("Vector_db directory not found!")
+    st.sidebar.write("Vectordb directory not found!")
 
 # Process text to format citations
 def format_citations_html(text):
@@ -445,13 +482,13 @@ def load_module_videos(file_path="module_videos.json"):
 
 # Load the FAISS index, vectorizer, and segment metadata
 @st.cache_resource(show_spinner=False)
-def load_faiss_resources(vector_db_dir="vector_db"):
-    index_path = os.path.join(vector_db_dir, "course_segments.index")
-    metadata_path = os.path.join(vector_db_dir, "segments_metadata.json")
-    vectorizer_path = os.path.join(vector_db_dir, "vectorizer.pkl")
+def load_faiss_resources(vectordb_dir="vectordb"):
+    index_path = os.path.join(vectordb_dir, "course_segments.index")
+    metadata_path = os.path.join(vectordb_dir, "segments_metadata.json")
+    vectorizer_path = os.path.join(vectordb_dir, "vectorizer.pkl")
     
     if not os.path.exists(index_path) or not os.path.exists(metadata_path) or not os.path.exists(vectorizer_path):
-        st.error(f"Vector database files not found in {vector_db_dir}")
+        st.error(f"Vector database files not found in {vectordb_dir}")
         return None, None, None
     
     try:
