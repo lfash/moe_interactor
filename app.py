@@ -277,11 +277,11 @@ except Exception as e:
 # Debug: Print directory information
 st.sidebar.write("Current working directory:", os.getcwd())
 st.sidebar.write("Files in directory:", os.listdir())
-st.sidebar.write("Vectordb exists:", os.path.exists("vectordb"))
-if os.path.exists("vectordb"):
-    st.sidebar.write("Files in vectordb:", os.listdir("vectordb"))
+st.sidebar.write("Vector_db exists:", os.path.exists("vector_db"))
+if os.path.exists("vector_db"):
+    st.sidebar.write("Files in vector_db:", os.listdir("vector_db"))
 else:
-    st.sidebar.write("Vectordb directory not found!")
+    st.sidebar.write("Vector_db directory not found!")
 
 # Process text to format citations
 def format_citations_html(text):
@@ -445,7 +445,7 @@ def load_module_videos(file_path="module_videos.json"):
 
 # Load the FAISS index, vectorizer, and segment metadata
 @st.cache_resource(show_spinner=False)
-def load_faiss_resources(vector_db_dir="vectordb"):
+def load_faiss_resources(vector_db_dir="vector_db"):
     index_path = os.path.join(vector_db_dir, "course_segments.index")
     metadata_path = os.path.join(vector_db_dir, "segments_metadata.json")
     vectorizer_path = os.path.join(vector_db_dir, "vectorizer.pkl")
