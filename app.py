@@ -447,7 +447,19 @@ def get_official_module_title(track_type, module_num, segment_title=None):
             3: ["Expanded Description of the Primal Body", "Central Pulse of Creation", 
                 "Addiction and Abuse as Constellations of Consciousness"],
             4: ["The Self, Authority, and Conscientiousness"],
-            5: ["Understanding Addiction and Exploitative Sy
+            5: ["Understanding Addiction and Exploitative Systems", "Fuck Around and Find Out"],
+            6: ["Being with the Discomfort of Not Knowing", "Belonging and Independence"],
+            7: ["The Erotic, Innocence, and Holding a Field of Love"],
+            8: ["Solving the Algorithm for Emergence"]
+        }
+    }
+    
+    # Default if track or module not found
+    if track_type not in module_titles or module_num not in module_titles[track_type]:
+        return f"Module {module_num} Content"
+    
+    # Just return the first title for this module - this is safer and prevents hallucination
+    return module_titles[track_type][module_num][0]
 
 # Load the FAISS index, vectorizer, and segment metadata
 @st.cache_resource(show_spinner=False)
