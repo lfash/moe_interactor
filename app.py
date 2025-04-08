@@ -454,6 +454,49 @@ def format_citation(segment_id, segment_title, segment_type="Live Session", modu
                     module_num = int(parts[1].replace("Module", ""))
                 else:
                     module_num = int(parts[1])
+                
+                # Get the official module title
+                track_type = "Professional Track"
+                module_title = get_official_module_title(track_type, module_num, segment_title)
+                
+                return f"{track_type}, Module {module_num}: {module_title}, Foundations Course, 2025"
+            except (ValueError, IndexError):
+                return f"Professional Track, {parts[1]}, discussing {segment_title}, Foundations Course, 2025"
+    elif parts[0] == "VC":
+        # Handle Voice Clips
+        voice_clip_titles = [
+            "3rd Way", "Attachment and Core Love", "Contact", "Desire",
+            "Emptiness and Existence", "Establishing Existence", "False Belonging",
+            "Fragility, Loyalty, and Systems of Oppression", "Having", "Leadership",
+            "Love", "Loyalty", "Narcissistic Body", "Now Time", "Order and Existence",
+            "Restoring Order of Emptiness", "Unloved, Unlived"
+        ]
+        
+        # Try to find best matching voice clip title
+        best_match = None
+        best_score = 0
+        
+        for vc_title in voice_clip_titles:
+            vc_lower = vc_title.lower()
+            segment_lower = segment_title.lower()
+            
+            # Check for word matches
+            common_words = set(vc_lower.split()).intersection(set(segment_lower.split()))
+            
+            score = 0
+            if common_words:
+                score = len(common_words) / len(vc_lower.split())
+                
+            if score > best_score:
+                best_score = score
+                best_match = vc_title
+        
+        if best_match and best_score > 0.2:
+            return f"Voice Clip - {best_match}, Foundations Course, 2025"
+        
+        return f"Voice Clip - {segment_title}, Foundations Course, 2025"
+    
+    return f"{segment_type} {segment_id}, Foundations Course, 2025"
 
 def get_official_module_title(track_type, module_num, segment_title=None):
     """Return the official module title based on track type and module number."""
