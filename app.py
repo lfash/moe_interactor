@@ -549,90 +549,60 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
     if not relevant_segments or len(relevant_segments) == 0:
         return None
     
-    if module_videos is None:
-        module_videos = {}
+    if module_videos is None or not module_videos:
+        # No module videos available
+        return None
     
-    # Focus only on Personal Track modules
-    filtered_segments = [
-        segment for segment in relevant_segments 
-        if segment.get('segment_id', '').startswith('PER_')
-    ]
+    # Filter to only Personal Track segments
+    filtered_segments = []
+    for segment in relevant_segments:
+        segment_id = segment.get('segment_id', '')
+        if segment_id.startswith('PER_'):
+            filtered_segments.append(segment)
     
-    # If no Personal Track segments found, return None
     if not filtered_segments:
         return None
     
-    module_scores = {}
-    
-    # Weight segments by their position in the citation list
-    # Earlier citations (lower index) get higher weight
-    for i, segment in enumerate(filtered_segments):
+    # Extract module numbers from segment IDs
+    module_counts = {}
+    for segment in filtered_segments:
         segment_id = segment.get('segment_id', '')
-        segment_info = extract_segment_info(segment_id)
-        
-        if not segment_info or not segment_info["type"] or not segment_info["module"]:
-            continue
-        
-        # Normalize module key to match our JSON structure
-        module_key = f"{segment_info['type']} Module {segment_info['module']}"
-        
-        segment_title = segment.get('title', 'Untitled')
-        
-        # Calculate score with position weighting
-        # Earlier segments get higher weight
-        position_weight = 1.0 / (i + 1)  # First item gets weight 1, second gets 0.5, etc.
-        base_score = segment.get('similarity_score', 0)
-        weighted_score = base_score * position_weight
-        
-        if module_key not in module_scores:
-            module_scores[module_key] = {
-                "total_score": 0,
-                "count": 0,
-                "title": segment_title,
-                "type": segment_info["type"],
-                "module": segment_info["module"],
-                "segment_id": segment_id,
-                "citation_positions": []  # Track positions of citations
-            }
-        
-        module_scores[module_key]["total_score"] += weighted_score
-        module_scores[module_key]["count"] += 1
-        module_scores[module_key]["citation_positions"].append(i)
+        parts = segment_id.split('_')
+        if len(parts) >= 2 and parts[0] == 'PER':
+            try:
+                # Extract module number directly from segment ID
+                if parts[1].startswith('Module'):
+                    module_num = parts[1].replace('Module', '')
+                else:
+                    module_num = parts[1]
+                
+                module_key = f"Personal Track Module {module_num}"
+                
+                if module_key not in module_counts:
+                    module_counts[module_key] = 0
+                module_counts[module_key] += 1
+            except:
+                continue
     
-    # No valid modules found
-    if not module_scores:
+    # If no modules found, return None
+    if not module_counts:
         return None
     
-    # Calculate final scores with bonuses
-    final_scores = {}
-    for module_key, data in module_scores.items():
-        # Base score is average of similarity scores
-        avg_score = data["total_score"] / data["count"] if data["count"] > 0 else 0
-        
-        # Bonus for more citations from the same module
-        citation_count_bonus = min(data["count"] * 0.1, 0.5)  # Max 50% bonus
-        
-        # Bonus for having the earliest citation
-        earliest_position = min(data["citation_positions"]) if data["citation_positions"] else 999
-        earliest_bonus = 0.2 if earliest_position == 0 else 0.1 if earliest_position <= 2 else 0
-        
-        final_scores[module_key] = avg_score + citation_count_bonus + earliest_bonus
+    # Find the most referenced module
+    best_module_key = max(module_counts, key=module_counts.get)
     
-    # Get the best module
-    best_module_key = max(final_scores, key=final_scores.get)
-    best_module = module_scores[best_module_key]
-    
-    # For debugging
-    print(f"Selected module: {best_module_key}")
-    print(f"Module videos keys: {list(module_videos.keys())}")
-    
-    # Add video information if available
+    # Create a module result object
     if best_module_key in module_videos:
-        best_module["video_thumbnail"] = module_videos[best_module_key].get("thumbnail")
-        best_module["purchase_url"] = module_videos[best_module_key].get("purchase_url")
-        best_module["video_title"] = module_videos[best_module_key].get("title")
+        module_num = best_module_key.split(' ')[-1]  # Get just the number
+        return {
+            "type": "Personal Track",
+            "module": module_num,
+            "video_thumbnail": module_videos[best_module_key]["thumbnail"],
+            "purchase_url": module_videos[best_module_key]["purchase_url"],
+            "video_title": module_videos[best_module_key]["title"]
+        }
     
-    return best_module
+    return None
 
 # Function to generate a response with Claude
 def generate_response(query, relevant_segments, conversation_history=None):
@@ -842,32 +812,32 @@ if st.session_state.current_query and st.session_state.current_response:
     st.markdown(f'<div class="message-container"><div class="assistant-message">{formatted_response}</div></div>', unsafe_allow_html=True)
     
     # Display module highlight if available
-    if st.session_state.current_module:
-        module_container = st.container()
-        with module_container:
-            # Get video information from the module
-            module_type = st.session_state.current_module.get("type", "")
-            module_num = st.session_state.current_module.get("module", "")
-            module_title = st.session_state.current_module.get("video_title", "Foundations Course")
-            
-            # Get purchase URL and thumbnail with fallbacks
-            purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
-            thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/yTqsldK.png")
-            
-            # Build the module display with a clickable thumbnail
-            module_container.markdown(f'''
-            <div class="module-highlight">
-                <div class="module-title">Listen to Bree: {module_title}</div>
-                <a href="{purchase_url}" target="_blank">
-                    <img src="{thumbnail}" alt="Bree Greenberg - {module_type} {module_num}" style="max-width: 100%;">
+if st.session_state.current_module:
+    module_container = st.container()
+    with module_container:
+        # Get video information from the module with fallbacks for all values
+        module_type = st.session_state.current_module.get("type", "Personal Track")
+        module_num = st.session_state.current_module.get("module", "")
+        module_title = st.session_state.current_module.get("video_title", "Foundations Course")
+        
+        # Get purchase URL and thumbnail with fallbacks
+        purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
+        thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/10dg2mS.png")
+        
+        # Build the module display with a clickable thumbnail
+        module_container.markdown(f'''
+        <div class="module-highlight">
+            <div class="module-title">Listen to Bree: {module_title}</div>
+            <a href="{purchase_url}" target="_blank">
+                <img src="{thumbnail}" alt="Bree Greenberg - {module_type} {module_num}" style="max-width: 100%;">
+            </a>
+            <div style="text-align: center; margin-top: 0.5rem;">
+                <a href="{purchase_url}" target="_blank" style="color: #317485; text-decoration: none;">
+                    Access this module →
                 </a>
-                <div style="text-align: center; margin-top: 0.5rem;">
-                    <a href="{purchase_url}" target="_blank" style="color: #317485; text-decoration: none;">
-                        Access this module →
-                    </a>
-                </div>
             </div>
-            ''', unsafe_allow_html=True)
+        </div>
+        ''', unsafe_allow_html=True)
 
 # Different UI depending on whether we're in a chat or not
 if not st.session_state.in_chat:
