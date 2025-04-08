@@ -418,6 +418,139 @@ def extract_segment_info(segment_id):
         "segment": segment_num
     }
 
+def get_official_module_title(track_type, module_num, segment_title=None):
+    """Return the official module title based on track type, module number and optional content hints."""
+    
+    module_titles = {
+        "Personal Track": {
+            1: [
+                "We Always Start with Existence",
+                "Primary Existence and Relational Existence",
+                "Qualification of Existence"
+            ],
+            2: [
+                "Surfing the Movement",
+                "The Two Bodies: Adaptation and Emergence",
+                "The Currency of the Adaptive Body"
+            ],
+            3: [
+                "Holding the Tension: Beyond Collapse and Control",
+                "Breaking Reality Fields",
+                "Mapping the Energetics of a Doublebind",
+                "Right Relationship with Power",
+                "Map of the Primal Body and Surrounding Fields"
+            ],
+            4: [
+                "Addictions Are A Resistance to Evolution",
+                "The Nature of Love"
+            ],
+            5: [
+                "Unbinding the Control Matrix",
+                "Remembering the Receiving of Love"
+            ],
+            6: [
+                "Deepening Concentration Without Force",
+                "You Can't Fuck Up Meditation",
+                "The Practice of Taking Everything Back to Nothing"
+            ],
+            7: [
+                "The Existence of True Intimacy",
+                "There is No Shortcut to Maturity",
+                "Integration Between All Realities"
+            ],
+            8: [
+                "The Place Where Intimacy is Happening is Now",
+                "Creating Velocity",
+                "Flickering Between States of Consciousness",
+                "Remediating Chronic Inflammation",
+                "Applying the Physics within Relationality",
+                "Instructions for Integration"
+            ]
+        },
+        "Professional Track": {
+            1: [
+                "Origins of the Model",
+                "Being in the Liminal"
+            ],
+            2: [
+                "Importance of View",
+                "Physics and Structure of Energetic Patterns"
+            ],
+            3: [
+                "Expanded Description of the Primal Body",
+                "Central Pulse of Creation",
+                "Addiction and Abuse as Constellations of Consciousness"
+            ],
+            4: [
+                "The Self, Authority, and Conscientiousness"
+            ],
+            5: [
+                "Understanding Addiction and Exploitative Systems",
+                "Fuck Around and Find Out"
+            ],
+            6: [
+                "Being with the Discomfort of Not Knowing",
+                "Belonging and Independence"
+            ],
+            7: [
+                "The Erotic, Innocence, and Holding a Field of Love"
+            ],
+            8: [
+                "Solving the Algorithm for Emergence"
+            ]
+        }
+    }
+    
+    # Default if track or module not found
+    if track_type not in module_titles or module_num not in module_titles[track_type]:
+        return f"Module {module_num}"
+    
+    # If no segment title provided, return the first title for this module
+    if not segment_title:
+        return module_titles[track_type][module_num][0]
+    
+    # Try to find the best match based on segment content
+    segment_lower = segment_title.lower()
+    best_match = None
+    best_score = 0
+    
+    for title in module_titles[track_type][module_num]:
+        title_lower = title.lower()
+        score = 0
+        
+        # Check for word matches
+        title_words = set(title_lower.split())
+        segment_words = set(segment_lower.split())
+        common_words = title_words.intersection(segment_words)
+        
+        # Calculate score based on matching words
+        if common_words:
+            score = len(common_words) / len(title_words)
+        
+        # Check for significant keywords
+        keywords = [
+            "existence", "relational", "adaptation", "bodies", "currency", 
+            "tension", "reality", "doublebind", "power", "primal",
+            "addiction", "love", "control", "concentration", "meditation",
+            "nothing", "intimacy", "maturity", "integration", "velocity",
+            "consciousness", "inflammation", "physics", "relationality",
+            "emptiness", "abuse", "erotic", "algorithm", "emergence"
+        ]
+        
+        for keyword in keywords:
+            if keyword in segment_lower and keyword in title_lower:
+                score += 0.2  # Bonus for important keyword matches
+        
+        if score > best_score:
+            best_score = score
+            best_match = title
+    
+    # If no good match found, return the first title as default
+    if not best_match or best_score < 0.1:
+        return module_titles[track_type][module_num][0]
+    
+    return best_match
+
 # Function to format segment ID into a proper citation
 def format_citation(segment_id, segment_title, segment_type="Live Session", module_videos=None):
     parts = segment_id.split('_')
@@ -440,16 +573,13 @@ def format_citation(segment_id, segment_title, segment_type="Live Session", modu
                 else:
                     module_num = int(parts[1])
                 
-                # Try to get the module title from module_videos
-                module_title = segment_title
-                if module_videos:
-                    module_key = f"Personal Track Module {module_num}"
-                    if module_key in module_videos:
-                        module_title = module_videos[module_key].get("title", "").split(" (")[0]  # Remove time in parentheses
+                # Get the official module title
+                track_type = "Personal Track"
+                module_title = get_official_module_title(track_type, module_num, segment_title)
                 
-                return f"Personal Track - Module {module_num}, {module_title}, discussing {segment_title}, Foundations Course, 2025"
+                return f"{track_type}, Module {module_num}: {module_title}, Foundations Course, 2025"
             except (ValueError, IndexError):
-                return f"Personal Track - {parts[1]}, {segment_title}, Foundations Course, 2025"
+                return f"Personal Track, {parts[1]}, {segment_title}, Foundations Course, 2025"
     elif parts[0] == "PRO":
         if len(parts) >= 3:
             try:
@@ -457,11 +587,47 @@ def format_citation(segment_id, segment_title, segment_type="Live Session", modu
                     module_num = int(parts[1].replace("Module", ""))
                 else:
                     module_num = int(parts[1])
-                return f"Professional Track - Module {module_num}, discussing {segment_title}, Foundations Course, 2025"
+                
+                # Get the official module title
+                track_type = "Professional Track"
+                module_title = get_official_module_title(track_type, module_num, segment_title)
+                
+                return f"{track_type}, Module {module_num}: {module_title}, Foundations Course, 2025"
             except (ValueError, IndexError):
-                return f"Professional Track - {parts[1]}, discussing {segment_title}, Foundations Course, 2025"
+                return f"Professional Track, {parts[1]}, discussing {segment_title}, Foundations Course, 2025"
     elif parts[0] == "VC":
-        return f"Voice Clip - discussing {segment_title}, Foundations Course, 2025"
+        # Handle Voice Clips
+        voice_clip_titles = [
+            "3rd Way", "Attachment and Core Love", "Contact", "Desire",
+            "Emptiness and Existence", "Establishing Existence", "False Belonging",
+            "Fragility, Loyalty, and Systems of Oppression", "Having", "Leadership",
+            "Love", "Loyalty", "Narcissistic Body", "Now Time", "Order and Existence",
+            "Restoring Order of Emptiness", "Unloved, Unlived"
+        ]
+        
+        # Try to find best matching voice clip title
+        best_match = None
+        best_score = 0
+        
+        for vc_title in voice_clip_titles:
+            vc_lower = vc_title.lower()
+            segment_lower = segment_title.lower()
+            
+            # Check for word matches
+            common_words = set(vc_lower.split()).intersection(set(segment_lower.split()))
+            
+            score = 0
+            if common_words:
+                score = len(common_words) / len(vc_lower.split())
+                
+            if score > best_score:
+                best_score = score
+                best_match = vc_title
+        
+        if best_match and best_score > 0.2:
+            return f"Voice Clip - {best_match}, Foundations Course, 2025"
+        
+        return f"Voice Clip - {segment_title}, Foundations Course, 2025"
     
     return f"{segment_type} {segment_id}, Foundations Course, 2025"
 
