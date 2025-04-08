@@ -545,47 +545,64 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
         return []
 
 # Function to determine the most relevant module
-def get_most_relevant_module(relevant_segments, module_videos=None):
+def get_most_relevant_module(relevant_segments, query="", module_videos=None):
     if module_videos is None or not module_videos:
-        # Return a default module if module_videos not available
-        return {
-            "type": "Personal Track",
-            "module": "1",
-            "video_thumbnail": "https://i.imgur.com/shJBySD.png",
-            "purchase_url": "https://the-center.circle.so/c/foundations-self-study",
-            "video_title": "We Always Start with Existence (3 mins)"
-        }
+        return None
     
-    # Filter to only Personal Track segments
-    filtered_segments = []
-    for segment in relevant_segments:
-        segment_id = segment.get('segment_id', '')
-        if segment_id.startswith('PER_'):
-            filtered_segments.append(segment)
+    # First, try to find a direct match between the query and module titles
+    if query:
+        query_lower = query.lower()
+        direct_matches = []
+        
+        for key, data in module_videos.items():
+            title = data.get("title", "").lower()
+            if "physics" in query_lower and "physics" in title:
+                direct_matches.append((key, 0.9))  # High score for physics
+            elif "relationality" in query_lower and "relationality" in title:
+                direct_matches.append((key, 0.9))  # High score for relationality
+            elif any(term in title for term in query_lower.split()):
+                direct_matches.append((key, 0.7))  # Medium score for any word match
+        
+        if direct_matches:
+            # Sort by score (highest first)
+            direct_matches.sort(key=lambda x: x[1], reverse=True)
+            best_match_key = direct_matches[0][0]
+            
+            module_num = best_match_key.split(' ')[-1]
+            return {
+                "type": "Personal Track",
+                "module": module_num,
+                "video_thumbnail": module_videos[best_match_key]["thumbnail"],
+                "purchase_url": module_videos[best_match_key]["purchase_url"],
+                "video_title": module_videos[best_match_key]["title"]
+            }
     
-    # If no filtered segments, return the first module as default
+    # If no direct match, proceed with segment-based matching
+    filtered_segments = [s for s in relevant_segments if s.get('segment_id', '').startswith('PER_')]
+    
     if not filtered_segments:
-        default_key = list(module_videos.keys())[0]  # Just get the first module
-        return {
-            "type": "Personal Track",
-            "module": default_key.split(' ')[-1],  # Get just the number
-            "video_thumbnail": module_videos[default_key]["thumbnail"],
-            "purchase_url": module_videos[default_key]["purchase_url"],
-            "video_title": module_videos[default_key]["title"]
-        }
+        # Default to Module 1 if no segments are found
+        default_key = "Personal Track Module 1"
+        if default_key in module_videos:
+            return {
+                "type": "Personal Track",
+                "module": "1",
+                "video_thumbnail": module_videos[default_key]["thumbnail"],
+                "purchase_url": module_videos[default_key]["purchase_url"],
+                "video_title": module_videos[default_key]["title"]
+            }
+        return None
     
-    # Extract module numbers from segment IDs
+    # Count module occurrences
     module_counts = {}
     for segment in filtered_segments:
         segment_id = segment.get('segment_id', '')
         parts = segment_id.split('_')
         if len(parts) >= 2 and parts[0] == 'PER':
             try:
-                # Extract module number directly from segment ID
-                if parts[1].startswith('Module'):
-                    module_num = parts[1].replace('Module', '')
-                else:
-                    module_num = parts[1]
+                module_num = parts[1]
+                if module_num.startswith('Module'):
+                    module_num = module_num.replace('Module', '')
                 
                 module_key = f"Personal Track Module {module_num}"
                 
@@ -595,34 +612,35 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
             except:
                 continue
     
-    # If no modules found, return the first module as default
     if not module_counts:
-        default_key = list(module_videos.keys())[0]  # Just get the first module
-        return {
-            "type": "Personal Track",
-            "module": default_key.split(' ')[-1],  # Get just the number
-            "video_thumbnail": module_videos[default_key]["thumbnail"],
-            "purchase_url": module_videos[default_key]["purchase_url"],
-            "video_title": module_videos[default_key]["title"]
-        }
+        default_key = "Personal Track Module 1"
+        if default_key in module_videos:
+            return {
+                "type": "Personal Track",
+                "module": "1",
+                "video_thumbnail": module_videos[default_key]["thumbnail"],
+                "purchase_url": module_videos[default_key]["purchase_url"],
+                "video_title": module_videos[default_key]["title"]
+            }
+        return None
     
     # Find the most referenced module
     best_module_key = max(module_counts, key=module_counts.get)
     
-    # If the best module key isn't in module_videos, use a default
+    # Ensure the key exists in module_videos
     if best_module_key not in module_videos:
-        # Try to find a module with the same number
-        module_num = best_module_key.split(' ')[-1]
+        # Try to find a similar key
         for key in module_videos.keys():
-            if key.endswith(f" {module_num}"):
+            if best_module_key.split(' ')[-1] in key:
                 best_module_key = key
                 break
         else:
-            # If still not found, use the first module
-            best_module_key = list(module_videos.keys())[0]
+            # If still not found, use Module 1
+            best_module_key = "Personal Track Module 1"
+            if best_module_key not in module_videos:
+                return None
     
-    # Create a module result object
-    module_num = best_module_key.split(' ')[-1]  # Get just the number
+    module_num = best_module_key.split(' ')[-1]
     return {
         "type": "Personal Track",
         "module": module_num,
@@ -839,28 +857,18 @@ if st.session_state.current_query and st.session_state.current_response:
     st.markdown(f'<div class="message-container"><div class="assistant-message">{formatted_response}</div></div>', unsafe_allow_html=True)
     
     # Display module highlight only if there's a current response
-if st.session_state.current_query and st.session_state.current_response:
-    module_container = st.container()
-    with module_container:
-        if st.session_state.current_module:
-            # Get video information from the module with fallbacks for all values
-            module_type = st.session_state.current_module.get("type", "Personal Track")
-            module_num = st.session_state.current_module.get("module", "1")
-            module_title = st.session_state.current_module.get("video_title", "We Always Start with Existence (3 mins)")
-            
-            # Get purchase URL and thumbnail with fallbacks
-            purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
-            thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/shJBySD.png")
-        else:
-            # Default values if no module is selected
-            module_type = "Personal Track"
-            module_num = "1"
-            module_title = "We Always Start with Existence (3 mins)"
-            purchase_url = "https://the-center.circle.so/c/foundations-self-study"
-            thumbnail = "https://i.imgur.com/shJBySD.png"
+    if st.session_state.current_module:
+        # Get video information from the module with fallbacks for all values
+        module_type = st.session_state.current_module.get("type", "Personal Track")
+        module_num = st.session_state.current_module.get("module", "1")
+        module_title = st.session_state.current_module.get("video_title", "We Always Start with Existence (3 mins)")
+        
+        # Get purchase URL and thumbnail with fallbacks
+        purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
+        thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/shJBySD.png")
         
         # Build the module display with a clickable thumbnail
-        module_container.markdown(f'''
+        st.markdown(f'''
         <div class="module-highlight">
             <div class="module-title">Listen to Bree: {module_title}</div>
             <a href="{purchase_url}" target="_blank">
@@ -873,21 +881,6 @@ if st.session_state.current_query and st.session_state.current_response:
             </div>
         </div>
         ''', unsafe_allow_html=True)
-    
-    # Build the module display with a clickable thumbnail
-    module_container.markdown(f'''
-    <div class="module-highlight">
-        <div class="module-title">Listen to Bree: {module_title}</div>
-        <a href="{purchase_url}" target="_blank">
-            <img src="{thumbnail}" alt="Bree Greenberg - {module_type} {module_num}" style="max-width: 100%;">
-        </a>
-        <div style="text-align: center; margin-top: 0.5rem;">
-            <a href="{purchase_url}" target="_blank" style="color: #317485; text-decoration: none;">
-                Access this module →
-            </a>
-        </div>
-    </div>
-    ''', unsafe_allow_html=True)
 
 # Different UI depending on whether we're in a chat or not
 if not st.session_state.in_chat:
@@ -938,7 +931,7 @@ if submit_button and query:
     response = generate_response(query, relevant_segments, conversation_history)
     
     # Determine most relevant module
-    most_relevant_module = get_most_relevant_module(relevant_segments, module_videos)
+    most_relevant_module = get_most_relevant_module(relevant_segments, query, module_videos)
     
     # Store results in session state
     st.session_state.current_response = response
