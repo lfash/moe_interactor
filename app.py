@@ -419,7 +419,7 @@ def extract_segment_info(segment_id):
     }
 
 # Function to format segment ID into a proper citation
-def format_citation(segment_id, segment_title, segment_type="Live Session"):
+def format_citation(segment_id, segment_title, segment_type="Live Session", module_videos=None):
     parts = segment_id.split('_')
     segment_info = extract_segment_info(segment_id)
     
@@ -427,14 +427,11 @@ def format_citation(segment_id, segment_title, segment_type="Live Session"):
         if len(parts) >= 2:
             try:
                 session_num = int(parts[1])
-                segment_detail = f"Segment {parts[-1]}" if len(parts) > 2 else ""
-                return f"Live Session {session_num}, {segment_detail}, Foundations Course, 2025"
+                return f"Live Session {session_num}, discussing {segment_title}, Foundations Course, 2025"
             except ValueError:
-                segment_detail = f"Segment {parts[-1]}" if len(parts) > 2 else ""
-                return f"Live Session {parts[1]}, {segment_detail}, Foundations Course, 2025"
+                return f"Live Session {parts[1]}, discussing {segment_title}, Foundations Course, 2025"
     elif parts[0] == "LS_Pro":
-        segment_detail = f"Segment {parts[-1]}" if len(parts) > 1 else ""
-        return f"Live Session Pro, {segment_detail}, Foundations Course, 2025"
+        return f"Live Session Pro, discussing {segment_title}, Foundations Course, 2025"
     elif parts[0] == "PER":
         if len(parts) >= 3:
             try:
@@ -442,11 +439,17 @@ def format_citation(segment_id, segment_title, segment_type="Live Session"):
                     module_num = int(parts[1].replace("Module", ""))
                 else:
                     module_num = int(parts[1])
-                segment_detail = f"Segment {parts[-1]}" if len(parts) > 3 else ""
-                return f"Personal Track - Module {module_num}, {segment_title}, {segment_detail}, Foundations Course, 2025"
+                
+                # Try to get the module title from module_videos
+                module_title = segment_title
+                if module_videos:
+                    module_key = f"Personal Track Module {module_num}"
+                    if module_key in module_videos:
+                        module_title = module_videos[module_key].get("title", "").split(" (")[0]  # Remove time in parentheses
+                
+                return f"Personal Track - Module {module_num}, {module_title}, discussing {segment_title}, Foundations Course, 2025"
             except (ValueError, IndexError):
-                segment_detail = f"Segment {parts[-1]}" if len(parts) > 3 else ""
-                return f"Personal Track - {parts[1]}, {segment_title}, {segment_detail}, Foundations Course, 2025"
+                return f"Personal Track - {parts[1]}, {segment_title}, Foundations Course, 2025"
     elif parts[0] == "PRO":
         if len(parts) >= 3:
             try:
@@ -454,14 +457,11 @@ def format_citation(segment_id, segment_title, segment_type="Live Session"):
                     module_num = int(parts[1].replace("Module", ""))
                 else:
                     module_num = int(parts[1])
-                segment_detail = f"Segment {parts[-1]}" if len(parts) > 3 else ""
-                return f"Professional Track - Module {module_num}, {segment_title}, {segment_detail}, Foundations Course, 2025"
+                return f"Professional Track - Module {module_num}, discussing {segment_title}, Foundations Course, 2025"
             except (ValueError, IndexError):
-                segment_detail = f"Segment {parts[-1]}" if len(parts) > 3 else ""
-                return f"Professional Track - {parts[1]}, {segment_title}, {segment_detail}, Foundations Course, 2025"
+                return f"Professional Track - {parts[1]}, discussing {segment_title}, Foundations Course, 2025"
     elif parts[0] == "VC":
-        segment_detail = f"Segment {parts[-1]}" if len(parts) > 2 else ""
-        return f"Voice Clip - {segment_title}, {segment_detail}, Foundations Course, 2025"
+        return f"Voice Clip - discussing {segment_title}, Foundations Course, 2025"
     
     return f"{segment_type} {segment_id}, Foundations Course, 2025"
 
@@ -688,7 +688,7 @@ Include appropriate academic citations for parts of your answer that draw on the
     for i, segment in enumerate(relevant_segments):
         segment_id = segment.get('segment_id', f"segment_{i+1}")
         segment_title = segment.get('title', 'Untitled')
-        citation_references[citation_count] = format_citation(segment_id, segment_title, segment.get('session_type', 'Unknown'))
+        citation_references[citation_count] = format_citation(segment_id, segment_title, segment.get('session_type', 'Unknown'), module_videos)
         
         context += f"--- Segment {i+1} (Citation {citation_count}) ---\n"
         context += f"Title: {segment_title}\n"
