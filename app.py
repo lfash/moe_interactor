@@ -541,6 +541,26 @@ def get_official_module_title(track_type, module_num, segment_title=None):
     # Just return the first title for this module - this is safer and prevents hallucination
     return module_titles[track_type][module_num][0]
 
+# Load the module video information
+@st.cache_resource(show_spinner=False)
+def load_module_videos(file_path="module_videos.json"):
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else:
+            # Default mapping if file doesn't exist
+            return {
+                "Personal Track Module 1": {
+                    "thumbnail": "https://i.imgur.com/shJBySD.png",
+                    "purchase_url": "https://the-center.circle.so/c/foundations-self-study",
+                    "title": "We Always Start with Existence (3 mins)"
+                }
+            }
+    except Exception as e:
+        st.error(f"Error loading module videos: {e}")
+        return {}
+
 # Load the FAISS index, vectorizer, and segment metadata
 @st.cache_resource(show_spinner=False)
 def load_faiss_resources(vectordb_dir="vectordb"):
