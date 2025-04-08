@@ -546,12 +546,15 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
 
 # Function to determine the most relevant module
 def get_most_relevant_module(relevant_segments, module_videos=None):
-    if not relevant_segments or len(relevant_segments) == 0:
-        return None
-    
     if module_videos is None or not module_videos:
-        # No module videos available
-        return None
+        # Return a default module if module_videos not available
+        return {
+            "type": "Personal Track",
+            "module": "1",
+            "video_thumbnail": "https://i.imgur.com/shJBySD.png",
+            "purchase_url": "https://the-center.circle.so/c/foundations-self-study",
+            "video_title": "We Always Start with Existence (3 mins)"
+        }
     
     # Filter to only Personal Track segments
     filtered_segments = []
@@ -560,8 +563,16 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
         if segment_id.startswith('PER_'):
             filtered_segments.append(segment)
     
+    # If no filtered segments, return the first module as default
     if not filtered_segments:
-        return None
+        default_key = list(module_videos.keys())[0]  # Just get the first module
+        return {
+            "type": "Personal Track",
+            "module": default_key.split(' ')[-1],  # Get just the number
+            "video_thumbnail": module_videos[default_key]["thumbnail"],
+            "purchase_url": module_videos[default_key]["purchase_url"],
+            "video_title": module_videos[default_key]["title"]
+        }
     
     # Extract module numbers from segment IDs
     module_counts = {}
@@ -584,25 +595,41 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
             except:
                 continue
     
-    # If no modules found, return None
+    # If no modules found, return the first module as default
     if not module_counts:
-        return None
+        default_key = list(module_videos.keys())[0]  # Just get the first module
+        return {
+            "type": "Personal Track",
+            "module": default_key.split(' ')[-1],  # Get just the number
+            "video_thumbnail": module_videos[default_key]["thumbnail"],
+            "purchase_url": module_videos[default_key]["purchase_url"],
+            "video_title": module_videos[default_key]["title"]
+        }
     
     # Find the most referenced module
     best_module_key = max(module_counts, key=module_counts.get)
     
-    # Create a module result object
-    if best_module_key in module_videos:
-        module_num = best_module_key.split(' ')[-1]  # Get just the number
-        return {
-            "type": "Personal Track",
-            "module": module_num,
-            "video_thumbnail": module_videos[best_module_key]["thumbnail"],
-            "purchase_url": module_videos[best_module_key]["purchase_url"],
-            "video_title": module_videos[best_module_key]["title"]
-        }
+    # If the best module key isn't in module_videos, use a default
+    if best_module_key not in module_videos:
+        # Try to find a module with the same number
+        module_num = best_module_key.split(' ')[-1]
+        for key in module_videos.keys():
+            if key.endswith(f" {module_num}"):
+                best_module_key = key
+                break
+        else:
+            # If still not found, use the first module
+            best_module_key = list(module_videos.keys())[0]
     
-    return None
+    # Create a module result object
+    module_num = best_module_key.split(' ')[-1]  # Get just the number
+    return {
+        "type": "Personal Track",
+        "module": module_num,
+        "video_thumbnail": module_videos[best_module_key]["thumbnail"],
+        "purchase_url": module_videos[best_module_key]["purchase_url"],
+        "video_title": module_videos[best_module_key]["title"]
+    }
 
 # Function to generate a response with Claude
 def generate_response(query, relevant_segments, conversation_history=None):
@@ -811,33 +838,40 @@ if st.session_state.current_query and st.session_state.current_response:
     
     st.markdown(f'<div class="message-container"><div class="assistant-message">{formatted_response}</div></div>', unsafe_allow_html=True)
     
-    # Display module highlight if available
-if st.session_state.current_module:
-    module_container = st.container()
-    with module_container:
+    # Display module highlight - always show a module
+module_container = st.container()
+with module_container:
+    if st.session_state.current_module:
         # Get video information from the module with fallbacks for all values
         module_type = st.session_state.current_module.get("type", "Personal Track")
-        module_num = st.session_state.current_module.get("module", "")
-        module_title = st.session_state.current_module.get("video_title", "Foundations Course")
+        module_num = st.session_state.current_module.get("module", "1")
+        module_title = st.session_state.current_module.get("video_title", "We Always Start with Existence (3 mins)")
         
         # Get purchase URL and thumbnail with fallbacks
         purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
-        thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/10dg2mS.png")
-        
-        # Build the module display with a clickable thumbnail
-        module_container.markdown(f'''
-        <div class="module-highlight">
-            <div class="module-title">Listen to Bree: {module_title}</div>
-            <a href="{purchase_url}" target="_blank">
-                <img src="{thumbnail}" alt="Bree Greenberg - {module_type} {module_num}" style="max-width: 100%;">
+        thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/shJBySD.png")
+    else:
+        # Default values if no module is selected
+        module_type = "Personal Track"
+        module_num = "1"
+        module_title = "We Always Start with Existence (3 mins)"
+        purchase_url = "https://the-center.circle.so/c/foundations-self-study"
+        thumbnail = "https://i.imgur.com/shJBySD.png"
+    
+    # Build the module display with a clickable thumbnail
+    module_container.markdown(f'''
+    <div class="module-highlight">
+        <div class="module-title">Listen to Bree: {module_title}</div>
+        <a href="{purchase_url}" target="_blank">
+            <img src="{thumbnail}" alt="Bree Greenberg - {module_type} {module_num}" style="max-width: 100%;">
+        </a>
+        <div style="text-align: center; margin-top: 0.5rem;">
+            <a href="{purchase_url}" target="_blank" style="color: #317485; text-decoration: none;">
+                Access this module →
             </a>
-            <div style="text-align: center; margin-top: 0.5rem;">
-                <a href="{purchase_url}" target="_blank" style="color: #317485; text-decoration: none;">
-                    Access this module →
-                </a>
-            </div>
         </div>
-        ''', unsafe_allow_html=True)
+    </div>
+    ''', unsafe_allow_html=True)
 
 # Different UI depending on whether we're in a chat or not
 if not st.session_state.in_chat:
