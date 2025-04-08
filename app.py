@@ -574,8 +574,7 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
             continue
         
         # Normalize module key to match our JSON structure
-        module_key = f"{segment_info['type']} {segment_info['module']}"
-        module_key = module_key.replace("Personal Track", "Personal Track Module")
+        module_key = f"{segment_info['type']} Module {segment_info['module']}"
         
         segment_title = segment.get('title', 'Untitled')
         
@@ -622,6 +621,10 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
     # Get the best module
     best_module_key = max(final_scores, key=final_scores.get)
     best_module = module_scores[best_module_key]
+    
+    # For debugging
+    print(f"Selected module: {best_module_key}")
+    print(f"Module videos keys: {list(module_videos.keys())}")
     
     # Add video information if available
     if best_module_key in module_videos:
