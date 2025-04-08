@@ -838,25 +838,41 @@ if st.session_state.current_query and st.session_state.current_response:
     
     st.markdown(f'<div class="message-container"><div class="assistant-message">{formatted_response}</div></div>', unsafe_allow_html=True)
     
-    # Display module highlight - always show a module
-module_container = st.container()
-with module_container:
-    if st.session_state.current_module:
-        # Get video information from the module with fallbacks for all values
-        module_type = st.session_state.current_module.get("type", "Personal Track")
-        module_num = st.session_state.current_module.get("module", "1")
-        module_title = st.session_state.current_module.get("video_title", "We Always Start with Existence (3 mins)")
+    # Display module highlight only if there's a current response
+if st.session_state.current_query and st.session_state.current_response:
+    module_container = st.container()
+    with module_container:
+        if st.session_state.current_module:
+            # Get video information from the module with fallbacks for all values
+            module_type = st.session_state.current_module.get("type", "Personal Track")
+            module_num = st.session_state.current_module.get("module", "1")
+            module_title = st.session_state.current_module.get("video_title", "We Always Start with Existence (3 mins)")
+            
+            # Get purchase URL and thumbnail with fallbacks
+            purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
+            thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/shJBySD.png")
+        else:
+            # Default values if no module is selected
+            module_type = "Personal Track"
+            module_num = "1"
+            module_title = "We Always Start with Existence (3 mins)"
+            purchase_url = "https://the-center.circle.so/c/foundations-self-study"
+            thumbnail = "https://i.imgur.com/shJBySD.png"
         
-        # Get purchase URL and thumbnail with fallbacks
-        purchase_url = st.session_state.current_module.get("purchase_url", "https://the-center.circle.so/c/foundations-self-study")
-        thumbnail = st.session_state.current_module.get("video_thumbnail", "https://i.imgur.com/shJBySD.png")
-    else:
-        # Default values if no module is selected
-        module_type = "Personal Track"
-        module_num = "1"
-        module_title = "We Always Start with Existence (3 mins)"
-        purchase_url = "https://the-center.circle.so/c/foundations-self-study"
-        thumbnail = "https://i.imgur.com/shJBySD.png"
+        # Build the module display with a clickable thumbnail
+        module_container.markdown(f'''
+        <div class="module-highlight">
+            <div class="module-title">Listen to Bree: {module_title}</div>
+            <a href="{purchase_url}" target="_blank">
+                <img src="{thumbnail}" alt="Bree Greenberg - {module_type} {module_num}" style="max-width: 100%;">
+            </a>
+            <div style="text-align: center; margin-top: 0.5rem;">
+                <a href="{purchase_url}" target="_blank" style="color: #317485; text-decoration: none;">
+                    Access this module →
+                </a>
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
     
     # Build the module display with a clickable thumbnail
     module_container.markdown(f'''
