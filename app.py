@@ -552,21 +552,38 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
     if module_videos is None:
         module_videos = {}
     
+    # Focus only on Personal Track modules
+    filtered_segments = [
+        segment for segment in relevant_segments 
+        if segment.get('segment_id', '').startswith('PER_')
+    ]
+    
+    # If no Personal Track segments found, return None
+    if not filtered_segments:
+        return None
+    
     module_scores = {}
     
-    for segment in relevant_segments:
+    # Weight segments by their position in the citation list
+    # Earlier citations (lower index) get higher weight
+    for i, segment in enumerate(filtered_segments):
         segment_id = segment.get('segment_id', '')
         segment_info = extract_segment_info(segment_id)
         
-        if not segment_info or not segment_info["type"]:
+        if not segment_info or not segment_info["type"] or not segment_info["module"]:
             continue
         
-        module_key = f"{segment_info['type']}"
-        if segment_info["module"]:
-            module_key += f" {segment_info['module']}"
+        # Normalize module key to match our JSON structure
+        module_key = f"{segment_info['type']} {segment_info['module']}"
+        module_key = module_key.replace("Personal Track", "Personal Track Module")
         
         segment_title = segment.get('title', 'Untitled')
-        score = segment.get('similarity_score', 0)
+        
+        # Calculate score with position weighting
+        # Earlier segments get higher weight
+        position_weight = 1.0 / (i + 1)  # First item gets weight 1, second gets 0.5, etc.
+        base_score = segment.get('similarity_score', 0)
+        weighted_score = base_score * position_weight
         
         if module_key not in module_scores:
             module_scores[module_key] = {
@@ -575,28 +592,42 @@ def get_most_relevant_module(relevant_segments, module_videos=None):
                 "title": segment_title,
                 "type": segment_info["type"],
                 "module": segment_info["module"],
-                "segment_id": segment_id
+                "segment_id": segment_id,
+                "citation_positions": []  # Track positions of citations
             }
         
-        module_scores[module_key]["total_score"] += score
+        module_scores[module_key]["total_score"] += weighted_score
         module_scores[module_key]["count"] += 1
+        module_scores[module_key]["citation_positions"].append(i)
     
-    best_module = None
-    best_score = 0
+    # No valid modules found
+    if not module_scores:
+        return None
     
+    # Calculate final scores with bonuses
+    final_scores = {}
     for module_key, data in module_scores.items():
+        # Base score is average of similarity scores
         avg_score = data["total_score"] / data["count"] if data["count"] > 0 else 0
-        if avg_score > best_score:
-            best_score = avg_score
-            best_module = data
+        
+        # Bonus for more citations from the same module
+        citation_count_bonus = min(data["count"] * 0.1, 0.5)  # Max 50% bonus
+        
+        # Bonus for having the earliest citation
+        earliest_position = min(data["citation_positions"]) if data["citation_positions"] else 999
+        earliest_bonus = 0.2 if earliest_position == 0 else 0.1 if earliest_position <= 2 else 0
+        
+        final_scores[module_key] = avg_score + citation_count_bonus + earliest_bonus
+    
+    # Get the best module
+    best_module_key = max(final_scores, key=final_scores.get)
+    best_module = module_scores[best_module_key]
     
     # Add video information if available
-    if best_module:
-        module_key = f"{best_module['type']} {best_module['module']}"
-        if module_key in module_videos:
-            best_module["video_thumbnail"] = module_videos[module_key].get("thumbnail")
-            best_module["purchase_url"] = module_videos[module_key].get("purchase_url")
-            best_module["video_title"] = module_videos[module_key].get("title")
+    if best_module_key in module_videos:
+        best_module["video_thumbnail"] = module_videos[best_module_key].get("thumbnail")
+        best_module["purchase_url"] = module_videos[best_module_key].get("purchase_url")
+        best_module["video_title"] = module_videos[best_module_key].get("title")
     
     return best_module
 
