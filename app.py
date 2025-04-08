@@ -622,59 +622,110 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
 
 def get_most_relevant_module(relevant_segments, query="", module_videos=None, response_text=None):
     """
-    Select the most relevant module by analyzing citations in the response.
+    Select the most relevant module by analyzing citations in the response,
+    and use the exact title from the citation.
     """
     if module_videos is None or not module_videos:
         return None
     
-    # Debug: Print available module_videos keys
-    print("Available modules:", list(module_videos.keys()))
+    # Map of all possible titles for each module
+    module_titles = {
+        1: [
+            "We Always Start with Existence",
+            "Primary Existence and Relational Existence",
+            "Qualification of Existence"
+        ],
+        2: [
+            "Surfing the Movement",
+            "The Two Bodies: Adaptation and Emergence",
+            "The Currency of the Adaptive Body"
+        ],
+        3: [
+            "Holding the Tension: Beyond Collapse and Control",
+            "Breaking Reality Fields",
+            "Mapping the Energetics of a Doublebind",
+            "Right Relationship with Power",
+            "Map of the Primal Body and Surrounding Fields"
+        ],
+        4: [
+            "Addictions Are A Resistance to Evolution",
+            "The Nature of Love"
+        ],
+        5: [
+            "Unbinding the Control Matrix",
+            "Remembering the Receiving of Love"
+        ],
+        6: [
+            "Deepening Concentration Without Force",
+            "You Can't Fuck Up Meditation",
+            "The Practice of Taking Everything Back to Nothing"
+        ],
+        7: [
+            "The Existence of True Intimacy",
+            "There is No Shortcut to Maturity",
+            "Integration Between All Realities"
+        ],
+        8: [
+            "The Place Where Intimacy is Happening is Now",
+            "Creating Velocity",
+            "Flickering Between States of Consciousness",
+            "Remediating Chronic Inflammation",
+            "Applying the Physics within Relationality",
+            "Instructions for Integration"
+        ]
+    }
     
     # For text-based approach (using the actual response text)
     if response_text:
-        print("Response text length:", len(response_text))
-        
-        # More specific pattern for numbered citation list at the end
-        citation_pattern = r'(\d+\.\s+Personal Track,\s+Module\s+\d+:.*?Foundations Course, 2025)'
+        # Pattern to extract full personal track citations
+        citation_pattern = r'(\d+\.\s+Personal Track,\s+Module\s+(\d+):\s+(.*?),\s+Foundations Course, 2025)'
         personal_citations = re.findall(citation_pattern, response_text)
         
-        print("Personal Track citations found:", personal_citations)
-        
-        # Extract module numbers from these citations
-        module_counts = {}
-        
-        for citation in personal_citations:
-            module_match = re.search(r'Personal Track,\s+Module\s+(\d+)', citation)
-            if module_match:
-                module_num = module_match.group(1)
+        if personal_citations:
+            # Count modules and collect titles
+            module_counts = {}
+            module_titles_found = {}
+            
+            for full_citation, module_num, title in personal_citations:
                 try:
                     module_num = int(module_num)
                     module_key = f"Personal Track Module {module_num}"
                     
                     if module_key not in module_counts:
                         module_counts[module_key] = 0
+                        module_titles_found[module_key] = []
+                    
                     module_counts[module_key] += 1
+                    module_titles_found[module_key].append(title.strip())
                 except ValueError:
                     continue
-        
-        print("Module counts from citations:", module_counts)
-        
-        # Select most frequently cited module
-        if module_counts:
-            best_module_key = max(module_counts, key=module_counts.get)
-            print("Best module from citations:", best_module_key)
             
-            if best_module_key in module_videos:
-                return {
-                    "type": "Personal Track",
-                    "module": best_module_key.split(' ')[-1],
-                    "video_thumbnail": module_videos[best_module_key]["thumbnail"],
-                    "purchase_url": module_videos[best_module_key]["purchase_url"],
-                    "video_title": module_videos[best_module_key]["title"]
-                }
+            # Select most frequently cited module
+            if module_counts:
+                best_module_key = max(module_counts, key=module_counts.get)
+                module_num = int(best_module_key.split(' ')[-1])
+                
+                # Get the most frequent title for this module
+                title_counts = {}
+                for title in module_titles_found[best_module_key]:
+                    if title not in title_counts:
+                        title_counts[title] = 0
+                    title_counts[title] += 1
+                
+                # Use the most frequently cited title
+                best_title = max(title_counts, key=title_counts.get) if title_counts else module_titles[module_num][0]
+                
+                if best_module_key in module_videos:
+                    # Create module info with original URL and thumbnail, but updated title
+                    return {
+                        "type": "Personal Track",
+                        "module": str(module_num),
+                        "video_thumbnail": module_videos[best_module_key]["thumbnail"],
+                        "purchase_url": module_videos[best_module_key]["purchase_url"],
+                        "video_title": best_title
+                    }
     
-    # Fallback to segment-based approach
-    print("Falling back to segment-based approach")
+    # Fallback to segment-based approach if no citations found
     filtered_segments = [s for s in relevant_segments if s.get('segment_id', '').startswith('PER_')]
     
     if not filtered_segments:
@@ -689,7 +740,7 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
             }
         return None
     
-    # Count module occurrences
+    # Standard segment-based approach (keeping original logic)
     module_counts = {}
     for segment in filtered_segments:
         segment_id = segment.get('segment_id', '')
