@@ -622,16 +622,16 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
 
 def get_most_relevant_module(relevant_segments, query="", module_videos=None, response_text=None):
     """
-    Select the most relevant module by checking which Personal Track modules 
-    appear in the response citations.
+    Select the most relevant module by checking the numbered citations at the end of the response.
     """
     if module_videos is None or not module_videos:
         return None
     
-    # First, extract module numbers from citations in the response
+    # First, extract Personal Track module citations from the response
     if response_text:
-        # Look for citations in the format "Personal Track, Module X: Title"
-        citation_pattern = r'Personal Track,?\s+Module\s+(\d+)'
+        # Look for citations at the end of the response in this format:
+        # "X. Personal Track, Module Y: Title, Foundations Course, 2025"
+        citation_pattern = r'\d+\.\s+Personal Track,\s+Module\s+(\d+)'
         cited_modules = re.findall(citation_pattern, response_text)
         
         # Convert to integers and count occurrences
@@ -647,7 +647,7 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
             except ValueError:
                 continue
         
-        # If we found module citations, use the most frequent one
+        # If we found Personal Track module citations, use the most frequent one
         if module_counts:
             best_module_key = max(module_counts, key=module_counts.get)
             
@@ -660,7 +660,7 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
                     "video_title": module_videos[best_module_key]["title"]
                 }
     
-    # If no modules found in citations, fall back to segment-based approach
+    # If no Personal Track modules found in citations, fall back to segment-based approach
     filtered_segments = [s for s in relevant_segments if s.get('segment_id', '').startswith('PER_')]
     
     if not filtered_segments:
