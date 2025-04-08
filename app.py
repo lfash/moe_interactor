@@ -418,6 +418,43 @@ def extract_segment_info(segment_id):
         "segment": segment_num
     }
 
+# Function to format segment ID into a proper citation
+def format_citation(segment_id, segment_title, segment_type="Live Session", module_videos=None):
+    parts = segment_id.split('_')
+    segment_info = extract_segment_info(segment_id)
+    
+    if parts[0] == "LS":
+        if len(parts) >= 2:
+            try:
+                session_num = int(parts[1])
+                return f"Live Session {session_num}, discussing {segment_title}, Foundations Course, 2025"
+            except ValueError:
+                return f"Live Session {parts[1]}, discussing {segment_title}, Foundations Course, 2025"
+    elif parts[0] == "LS_Pro":
+        return f"Live Session Pro, discussing {segment_title}, Foundations Course, 2025"
+    elif parts[0] == "PER":
+        if len(parts) >= 3:
+            try:
+                if "Module" in parts[1]:
+                    module_num = int(parts[1].replace("Module", ""))
+                else:
+                    module_num = int(parts[1])
+                
+                # Get the official module title
+                track_type = "Personal Track"
+                module_title = get_official_module_title(track_type, module_num, segment_title)
+                
+                return f"{track_type}, Module {module_num}: {module_title}, Foundations Course, 2025"
+            except (ValueError, IndexError):
+                return f"Personal Track, {parts[1]}, {segment_title}, Foundations Course, 2025"
+    elif parts[0] == "PRO":
+        if len(parts) >= 3:
+            try:
+                if "Module" in parts[1]:
+                    module_num = int(parts[1].replace("Module", ""))
+                else:
+                    module_num = int(parts[1])
+
 def get_official_module_title(track_type, module_num, segment_title=None):
     """Return the official module title based on track type and module number."""
     
@@ -599,7 +636,7 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None):
     }
 
 # Function to generate a response with Claude
-def generate_response(query, relevant_segments, conversation_history=None):
+def generate_response(query, relevant_segments, conversation_history=None, module_videos=None):
     if anthropic_client is None:
         st.error("Claude API connection not available")
         return "Sorry, we cannot generate a response at this time due to API connection issues."
@@ -877,7 +914,7 @@ if submit_button and query:
     conversation_history = st.session_state.conversation[:-1] if len(st.session_state.conversation) > 1 else None
     
     # Generate response
-    response = generate_response(query, relevant_segments, conversation_history)
+    response = generate_response(query, relevant_segments, conversation_history, module_videos)
     
     # Determine most relevant module - ensure we pass the query
     most_relevant_module = get_most_relevant_module(relevant_segments, query, module_videos)
