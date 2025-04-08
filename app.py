@@ -622,34 +622,47 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
 
 def get_most_relevant_module(relevant_segments, query="", module_videos=None, response_text=None):
     """
-    Select the most relevant module by checking the numbered citations at the end of the response.
+    Select the most relevant module by analyzing citations in the response.
     """
     if module_videos is None or not module_videos:
         return None
     
-    # First, extract Personal Track module citations from the response
+    # Debug: Print available module_videos keys
+    print("Available modules:", list(module_videos.keys()))
+    
+    # For text-based approach (using the actual response text)
     if response_text:
-        # Look for citations at the end of the response in this format:
-        # "X. Personal Track, Module Y: Title, Foundations Course, 2025"
-        citation_pattern = r'\d+\.\s+Personal Track,\s+Module\s+(\d+)'
-        cited_modules = re.findall(citation_pattern, response_text)
+        print("Response text length:", len(response_text))
         
-        # Convert to integers and count occurrences
+        # More specific pattern for numbered citation list at the end
+        citation_pattern = r'(\d+\.\s+Personal Track,\s+Module\s+\d+:.*?Foundations Course, 2025)'
+        personal_citations = re.findall(citation_pattern, response_text)
+        
+        print("Personal Track citations found:", personal_citations)
+        
+        # Extract module numbers from these citations
         module_counts = {}
-        for module_num in cited_modules:
-            try:
-                module_num = int(module_num)
-                module_key = f"Personal Track Module {module_num}"
-                
-                if module_key not in module_counts:
-                    module_counts[module_key] = 0
-                module_counts[module_key] += 1
-            except ValueError:
-                continue
         
-        # If we found Personal Track module citations, use the most frequent one
+        for citation in personal_citations:
+            module_match = re.search(r'Personal Track,\s+Module\s+(\d+)', citation)
+            if module_match:
+                module_num = module_match.group(1)
+                try:
+                    module_num = int(module_num)
+                    module_key = f"Personal Track Module {module_num}"
+                    
+                    if module_key not in module_counts:
+                        module_counts[module_key] = 0
+                    module_counts[module_key] += 1
+                except ValueError:
+                    continue
+        
+        print("Module counts from citations:", module_counts)
+        
+        # Select most frequently cited module
         if module_counts:
             best_module_key = max(module_counts, key=module_counts.get)
+            print("Best module from citations:", best_module_key)
             
             if best_module_key in module_videos:
                 return {
@@ -660,7 +673,8 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
                     "video_title": module_videos[best_module_key]["title"]
                 }
     
-    # If no Personal Track modules found in citations, fall back to segment-based approach
+    # Fallback to segment-based approach
+    print("Falling back to segment-based approach")
     filtered_segments = [s for s in relevant_segments if s.get('segment_id', '').startswith('PER_')]
     
     if not filtered_segments:
@@ -675,7 +689,7 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
             }
         return None
     
-    # Standard segment-based approach as fallback
+    # Count module occurrences
     module_counts = {}
     for segment in filtered_segments:
         segment_id = segment.get('segment_id', '')
@@ -1006,8 +1020,8 @@ if submit_button and query:
     
     # Generate response
     response = generate_response(query, relevant_segments, conversation_history, module_videos)
-
-    # Determine most relevant module - passing the actual response text
+    
+    # Determine most relevant module - PASS THE RESPONSE TEXT HERE
     most_relevant_module = get_most_relevant_module(relevant_segments, query, module_videos, response)
     
     # Debug logging
