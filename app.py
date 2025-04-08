@@ -622,33 +622,35 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
 
 def get_most_relevant_module(relevant_segments, query="", module_videos=None, response_text=None):
     """
-    Select the most relevant module, prioritizing modules that appear in the citations
-    in the actual response.
+    Select the most relevant module by checking which Personal Track modules 
+    appear in the response citations.
     """
     if module_videos is None or not module_videos:
         return None
     
-    # First, try to extract module numbers from citations in the response
-    cited_modules = []
+    # First, extract module numbers from citations in the response
     if response_text:
-        # Find citation patterns in the text
+        # Look for citations in the format "Personal Track, Module X: Title"
         citation_pattern = r'Personal Track,?\s+Module\s+(\d+)'
         cited_modules = re.findall(citation_pattern, response_text)
-        cited_modules = [int(num) for num in cited_modules if num.isdigit()]
-    
-    # If we found modules in citations, use those first
-    if cited_modules:
-        # Count frequency of each cited module
+        
+        # Convert to integers and count occurrences
         module_counts = {}
         for module_num in cited_modules:
-            module_key = f"Personal Track Module {module_num}"
-            if module_key not in module_counts:
-                module_counts[module_key] = 0
-            module_counts[module_key] += 1
+            try:
+                module_num = int(module_num)
+                module_key = f"Personal Track Module {module_num}"
+                
+                if module_key not in module_counts:
+                    module_counts[module_key] = 0
+                module_counts[module_key] += 1
+            except ValueError:
+                continue
         
-        # Find most cited module
+        # If we found module citations, use the most frequent one
         if module_counts:
             best_module_key = max(module_counts, key=module_counts.get)
+            
             if best_module_key in module_videos:
                 return {
                     "type": "Personal Track",
@@ -658,7 +660,7 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
                     "video_title": module_videos[best_module_key]["title"]
                 }
     
-    # Fallback to the original segment-based approach
+    # If no modules found in citations, fall back to segment-based approach
     filtered_segments = [s for s in relevant_segments if s.get('segment_id', '').startswith('PER_')]
     
     if not filtered_segments:
@@ -673,17 +675,16 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
             }
         return None
     
-    # Count module occurrences
+    # Standard segment-based approach as fallback
     module_counts = {}
     for segment in filtered_segments:
         segment_id = segment.get('segment_id', '')
         parts = segment_id.split('_')
         if len(parts) >= 2 and parts[0] == 'PER':
             try:
-                if parts[1].startswith('Module'):
-                    module_num = parts[1].replace('Module', '')
-                else:
-                    module_num = parts[1]
+                module_num = parts[1]
+                if module_num.startswith('Module'):
+                    module_num = module_num.replace('Module', '')
                 
                 module_key = f"Personal Track Module {module_num}"
                 
@@ -1005,8 +1006,8 @@ if submit_button and query:
     
     # Generate response
     response = generate_response(query, relevant_segments, conversation_history, module_videos)
-    
-    # Determine most relevant module - pass the response text
+
+    # Determine most relevant module - passing the actual response text
     most_relevant_module = get_most_relevant_module(relevant_segments, query, module_videos, response)
     
     # Debug logging
