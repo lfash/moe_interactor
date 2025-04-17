@@ -6,12 +6,102 @@ import numpy as np
 import json
 import pickle
 import re
+import time
+import logging
+import hashlib
+import bleach
+import base64
+from cryptography.fernet import Fernet
 from sklearn.feature_extraction.text import TfidfVectorizer
 from dotenv import load_dotenv
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("understanding-foundations")
+
+# Centralized configuration
+CONFIG = {
+    "debug_mode": os.getenv("DEBUG_MODE", "False").lower() == "true",
+    "api_keys": {
+        "anthropic": st.secrets.get("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", "")),
+    },
+    "rate_limits": {
+        "max_requests_per_minute": 20,
+        "max_requests_per_hour": 100
+    },
+    "paths": {
+        "vectordb": "vectordb",
+        "module_videos": "module_videos.json"
+    },
+    "models": {
+        "primary": "claude-3-7-sonnet-20250219",
+        "fallback": "claude-3-opus-20240229"
+    },
+    "encryption_key": os.getenv("ENCRYPTION_KEY", "")
+}
+
+# Initialize encryption if key is available
+encryption_enabled = False
+fernet = None
+if CONFIG["encryption_key"]:
+    try:
+        # Convert string key to bytes and validate it's a valid Fernet key
+        key = CONFIG["encryption_key"].encode()
+        if len(key) != 32 and not CONFIG["encryption_key"].endswith("="):
+            # Generate a key from the provided string if it's not already a Fernet key
+            key = base64.urlsafe_b64encode(hashlib.sha256(key).digest())
+        fernet = Fernet(key)
+        encryption_enabled = True
+        logger.info("Encryption initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing encryption: {e}")
+
+# Rate limiting implementation
+class RateLimiter:
+    def __init__(self, max_per_minute=10, max_per_hour=100):
+        self.max_per_minute = max_per_minute
+        self.max_per_hour = max_per_hour
+        self.request_timestamps = []
+    
+    def check_rate_limit(self):
+        """Check if the current request exceeds rate limits"""
+        now = datetime.now()
+        
+        # Clean up old timestamps
+        self.request_timestamps = [ts for ts in self.request_timestamps 
+                                  if now - ts < timedelta(hours=1)]
+        
+        # Check hourly limit
+        if len(self.request_timestamps) >= self.max_per_hour:
+            return False, "Hourly rate limit exceeded. Please try again later."
+        
+        # Check minute limit
+        minute_ago = now - timedelta(minutes=1)
+        recent_requests = sum(1 for ts in self.request_timestamps if ts > minute_ago)
+        if recent_requests >= self.max_per_minute:
+            return False, "Rate limit exceeded. Please wait a moment before trying again."
+        
+        # Add current timestamp and allow request
+        self.request_timestamps.append(now)
+        return True, ""
+
+# Initialize rate limiter
+rate_limiter = RateLimiter(
+    max_per_minute=CONFIG["rate_limits"]["max_requests_per_minute"],
+    max_per_hour=CONFIG["rate_limits"]["max_requests_per_hour"]
+)
 
 # Set page configuration
 st.set_page_config(
@@ -20,42 +110,53 @@ st.set_page_config(
     layout="wide"
 )
 
-@st.cache_resource(show_spinner=False)
-def load_faiss_resources(vectordb_dir="vectordb"):
-    # Get the absolute path to the script directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+# Input sanitization function
+def sanitize_input(text):
+    """Sanitize user input to prevent injection attacks"""
+    if not text:
+        return ""
     
-    # Construct absolute path to vector_db
-    vectordb_path = os.path.join(script_dir, vectordb_dir)
+    # Use bleach to clean the input
+    cleaned_text = bleach.clean(text, strip=True)
     
-    # Debug output
-    st.sidebar.write(f"Looking for files in: {vectordb_path}")
+    # Remove potential prompt injection patterns
+    patterns_to_remove = [
+        r'<(?:system|assistant|user|style|instructions|prompt)>.*?</(?:system|assistant|user|style|instructions|prompt)>',
+        r'\[(?:system|assistant|user|style|instructions|prompt)\].*?\[/(?:system|assistant|user|style|instructions|prompt)\]',
+        r'```(?:system|assistant|user|style|instructions|prompt).*?```'
+    ]
     
-    index_path = os.path.join(vectordb_path, "course_segments.index")
-    metadata_path = os.path.join(vectordb_path, "segments_metadata.json")
-    vectorizer_path = os.path.join(vectordb_path, "vectorizer.pkl")
+    for pattern in patterns_to_remove:
+        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.DOTALL)
     
-    # Check if each file exists
-    st.sidebar.write(f"index_path exists: {os.path.exists(index_path)}")
-    st.sidebar.write(f"metadata_path exists: {os.path.exists(metadata_path)}")
-    st.sidebar.write(f"vectorizer_path exists: {os.path.exists(vectorizer_path)}")
-    
-    if not os.path.exists(index_path) or not os.path.exists(metadata_path) or not os.path.exists(vectorizer_path):
-        st.error(f"Vector database files not found in {vectordb_path}")
-        return None, None, None
+    return cleaned_text.strip()
 
-# Check various possible locations
-possible_paths = [
-    "vectordb",
-    "./vectordb",
-    "../vectordb",
-    os.path.join(os.getcwd(), "vectordb")
-]
+# Encryption/decryption helpers
+def encrypt_sensitive_data(data):
+    """Encrypt sensitive data if encryption is enabled"""
+    if not encryption_enabled or not fernet:
+        return data
+    
+    try:
+        if isinstance(data, str):
+            return fernet.encrypt(data.encode()).decode()
+        return data
+    except Exception as e:
+        logger.error(f"Encryption error: {e}")
+        return data
 
-for path in possible_paths:
-    st.sidebar.write(f"Checking {path} exists: {os.path.exists(path)}")
-    if os.path.exists(path):
-        st.sidebar.write(f"Files in {path}: {os.listdir(path)}")
+def decrypt_sensitive_data(data):
+    """Decrypt sensitive data if encryption is enabled"""
+    if not encryption_enabled or not fernet or not data:
+        return data
+    
+    try:
+        if isinstance(data, str):
+            return fernet.decrypt(data.encode()).decode()
+        return data
+    except Exception as e:
+        logger.error(f"Decryption error: {e}")
+        return data
 
 # Custom CSS for UI styling
 st.markdown(
@@ -90,6 +191,9 @@ st.markdown(
     section[data-testid="stSidebar"] {display: none;}
     div[data-baseweb="spinner"] {display: none !important;}
     
+    /* Debug mode sidebar visibility control */
+    .debug-visible section[data-testid="stSidebar"] {display: block !important;}
+    
     /* Header styling - STICKY header */
     .app-header {
         background-color: #191B1F;
@@ -100,23 +204,23 @@ st.markdown(
         z-index: 999;
     }
     .app-title {
-    font-family: 'Futura', 'Trebuchet MS', sans-serif !important;
-    color: white !important;
-    font-size: 1.5rem !important;
-    font-weight: 300 !important; /* Changed from normal to 300 for lighter weight */
-    margin-bottom: 0.2rem !important;
-    text-transform: none !important;
-    letter-spacing: normal !important;
-}
-.app-subtitle {
-    font-family: 'Futura', 'Trebuchet MS', sans-serif !important;
-    color: #ccc !important;
-    font-size: 0.9rem !important;
-    font-weight: 300 !important;
-    margin-top: 0 !important;
-    text-transform: none !important;
-    letter-spacing: normal !important;
-}
+        font-family: 'Futura', 'Trebuchet MS', sans-serif !important;
+        color: white !important;
+        font-size: 1.5rem !important;
+        font-weight: 300 !important;
+        margin-bottom: 0.2rem !important;
+        text-transform: none !important;
+        letter-spacing: normal !important;
+    }
+    .app-subtitle {
+        font-family: 'Futura', 'Trebuchet MS', sans-serif !important;
+        color: #ccc !important;
+        font-size: 0.9rem !important;
+        font-weight: 300 !important;
+        margin-top: 0 !important;
+        text-transform: none !important;
+        letter-spacing: normal !important;
+    }
     
     /* Message styling */
     .message-container { margin-bottom: 1.5rem; font-family: Arial, sans-serif; }
@@ -306,27 +410,66 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Debug API key (only show length for security)
-try:
-    anthropic_api_key = st.secrets["ANTHROPIC_API_KEY"]
-    st.sidebar.write("API key found, length:", len(anthropic_api_key))
-    # Show first and last few characters to verify it's correct without revealing the full key
-    st.sidebar.write("API key starts with:", anthropic_api_key[:7] + "..." + anthropic_api_key[-4:])
-except Exception as e:
-    st.sidebar.write("Error accessing API key:", str(e))
-    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+# Set debug mode based on CONFIG
+debug_mode = CONFIG["debug_mode"]
 
-# Debug: Print directory information
-st.sidebar.write("Current working directory:", os.getcwd())
-st.sidebar.write("Files in directory:", os.listdir())
-st.sidebar.write("Vectordb exists:", os.path.exists("vectordb"))
-if os.path.exists("vectordb"):
-    st.sidebar.write("Files in vectordb:", os.listdir("vectordb"))
+# Add debug mode toggle in main UI
+if st.sidebar.checkbox("Enable Debug Mode", value=debug_mode):
+    debug_mode = True
+    # Add CSS class to make sidebar visible in debug mode
+    st.markdown(
+        """
+        <style>
+        .element-container:has(.debug-visible) + section[data-testid="stSidebar"] {
+            display: block !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    st.markdown('<div class="debug-visible"></div>', unsafe_allow_html=True)
 else:
-    st.sidebar.write("Vectordb directory not found!")
+    debug_mode = False
+
+# Debug info in sidebar (only shown in debug mode)
+if debug_mode:
+    st.sidebar.write("### Debug Information")
+    st.sidebar.write("Debug mode is enabled")
+    
+    # Safe API key info (only length)
+    if CONFIG["api_keys"]["anthropic"]:
+        st.sidebar.write(f"API key length: {len(CONFIG['api_keys']['anthropic'])}")
+        st.sidebar.write(f"API key starts with: {CONFIG['api_keys']['anthropic'][:4]}...")
+    else:
+        st.sidebar.write("API key not found")
+    
+    # Directory information
+    st.sidebar.write("Current working directory:", os.getcwd())
+    st.sidebar.write("Files in directory:", os.listdir())
+    
+    vectordb_path = CONFIG["paths"]["vectordb"]
+    st.sidebar.write(f"Vectordb exists: {os.path.exists(vectordb_path)}")
+    if os.path.exists(vectordb_path):
+        st.sidebar.write(f"Files in vectordb: {os.listdir(vectordb_path)}")
+    else:
+        st.sidebar.write("Vectordb directory not found!")
+    
+    # Check various possible locations
+    possible_paths = [
+        "vectordb",
+        "./vectordb",
+        "../vectordb",
+        os.path.join(os.getcwd(), "vectordb")
+    ]
+
+    for path in possible_paths:
+        st.sidebar.write(f"Checking {path} exists: {os.path.exists(path)}")
+        if os.path.exists(path):
+            st.sidebar.write(f"Files in {path}: {os.listdir(path)}")
 
 # Process text to format citations
 def format_citations_html(text):
+    """Format citations in the response text as HTML"""
     # Find any numbered citations at the end of the text
     citation_pattern = r'(\d+\.\s+.+?(?:,\s*\d{4}))'
     citations = re.findall(citation_pattern, text.split("\n\n")[-1])
@@ -348,15 +491,25 @@ def format_citations_html(text):
 
 # Initialize API clients
 try:
-    # Try to get API key from secrets first, then fall back to env vars
-    anthropic_api_key = st.secrets.get("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY"))
+    # Initialize Anthropic client with API key from CONFIG
+    anthropic_api_key = CONFIG["api_keys"]["anthropic"]
+    if not anthropic_api_key:
+        raise ValueError("No Anthropic API key found")
+    
     anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
+    logger.info("Anthropic client initialized successfully")
+    if debug_mode:
+        st.sidebar.write("Anthropic client initialized successfully")
 except Exception as e:
-    st.error(f"Error connecting to Claude API: {e}")
+    error_msg = f"Error connecting to Claude API: {e}"
+    logger.error(error_msg)
+    if debug_mode:
+        st.sidebar.error(error_msg)
     anthropic_client = None
 
 # Function to clean text
 def clean_text(text):
+    """Clean and normalize text for processing"""
     if not text:
         return ""
     text = text.encode('ascii', 'ignore').decode('ascii')
@@ -365,11 +518,13 @@ def clean_text(text):
 
 # Name correction function
 def correct_names(text):
+    """Replace 'Sanjay' with 'Bree' in the text"""
     text = re.sub(r'\bSanjay\b', 'Bree', text, flags=re.IGNORECASE)
     return text
 
 # Function to extract segment information for citation
 def extract_segment_info(segment_id):
+    """Extract structured information from a segment ID"""
     parts = segment_id.split('_')
     
     if len(parts) < 2:
@@ -420,6 +575,7 @@ def extract_segment_info(segment_id):
 
 # Function to format segment ID into a proper citation
 def format_citation(segment_id, segment_title, segment_type="Live Session", module_videos=None):
+    """Format a segment ID into a proper academic citation"""
     parts = segment_id.split('_')
     segment_info = extract_segment_info(segment_id)
     
@@ -543,13 +699,22 @@ def get_official_module_title(track_type, module_num, segment_title=None):
 
 # Load the module video information
 @st.cache_resource(show_spinner=False)
-def load_module_videos(file_path="module_videos.json"):
+def load_module_videos(file_path=None):
+    """Load module video information from a JSON file or use defaults."""
+    if file_path is None:
+        file_path = CONFIG["paths"]["module_videos"]
+        
     try:
         if os.path.exists(file_path):
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if debug_mode:
+                    st.sidebar.write(f"Loaded {len(data)} module videos")
+                return data
         else:
             # Default mapping if file doesn't exist
+            if debug_mode:
+                st.sidebar.write(f"Module videos file not found at {file_path}, using defaults")
             return {
                 "Personal Track Module 1": {
                     "thumbnail": "https://i.imgur.com/shJBySD.png",
@@ -558,18 +723,33 @@ def load_module_videos(file_path="module_videos.json"):
                 }
             }
     except Exception as e:
-        st.error(f"Error loading module videos: {e}")
+        error_msg = f"Error loading module videos: {e}"
+        logger.error(error_msg)
+        if debug_mode:
+            st.sidebar.error(error_msg)
         return {}
 
 # Load the FAISS index, vectorizer, and segment metadata
 @st.cache_resource(show_spinner=False)
-def load_faiss_resources(vectordb_dir="vectordb"):
+def load_faiss_resources(vectordb_dir=None):
+    """Load FAISS index and related resources from disk."""
+    if vectordb_dir is None:
+        vectordb_dir = CONFIG["paths"]["vectordb"]
+        
     index_path = os.path.join(vectordb_dir, "course_segments.index")
     metadata_path = os.path.join(vectordb_dir, "segments_metadata.json")
     vectorizer_path = os.path.join(vectordb_dir, "vectorizer.pkl")
     
+    if debug_mode:
+        st.sidebar.write(f"Loading FAISS resources from: {vectordb_dir}")
+        st.sidebar.write(f"index_path exists: {os.path.exists(index_path)}")
+        st.sidebar.write(f"metadata_path exists: {os.path.exists(metadata_path)}")
+        st.sidebar.write(f"vectorizer_path exists: {os.path.exists(vectorizer_path)}")
+    
     if not os.path.exists(index_path) or not os.path.exists(metadata_path) or not os.path.exists(vectorizer_path):
-        st.error(f"Vector database files not found in {vectordb_dir}")
+        error_msg = f"Vector database files not found in {vectordb_dir}"
+        logger.error(error_msg)
+        st.error(error_msg)
         return None, None, None
     
     try:
@@ -581,22 +761,34 @@ def load_faiss_resources(vectordb_dir="vectordb"):
         with open(vectorizer_path, "rb") as f:
             vectorizer = pickle.load(f)
         
+        if debug_mode:
+            st.sidebar.write(f"Successfully loaded index with {index.ntotal} vectors")
+            st.sidebar.write(f"Loaded {len(segments_metadata)} metadata entries")
+        
         return index, segments_metadata, vectorizer
     except Exception as e:
-        st.error(f"Error loading vector database files: {e}")
+        error_msg = f"Error loading vector database files: {e}"
+        logger.error(error_msg)
+        st.error(error_msg)
         return None, None, None
 
 # Function to search for relevant segments
 def search_segments(query, index, segments_metadata, vectorizer, limit=5):
+    """Search for course segments relevant to the query."""
     if index is None or segments_metadata is None or vectorizer is None:
+        logger.error("Vector database resources not loaded properly")
         st.error("Vector database resources not loaded properly")
         return []
     
     try:
-        clean_query = clean_text(query)
+        # Clean and sanitize the query
+        clean_query = clean_text(sanitize_input(query))
+        
+        # Convert to vector and search
         query_vector = vectorizer.transform([clean_query]).toarray().astype('float32')
         distances, indices = index.search(query_vector, limit)
         
+        # Process results
         results = []
         for i, idx in enumerate(indices[0]):
             if idx != -1 and idx < len(segments_metadata):
@@ -615,9 +807,18 @@ def search_segments(query, index, segments_metadata, vectorizer, limit=5):
                     "similarity_score": float(1.0 / (1.0 + distances[0][i]))
                 })
         
+        # Log search results in debug mode
+        if debug_mode and results:
+            st.sidebar.write(f"Found {len(results)} relevant segments")
+            if len(results) > 0:
+                st.sidebar.write(f"Top result: {results[0]['title']} (score: {results[0]['similarity_score']:.2f})")
+        
         return results
     except Exception as e:
-        st.error(f"Error during search: {e}")
+        error_msg = f"Error during search: {e}"
+        logger.error(error_msg)
+        if debug_mode:
+            st.sidebar.error(error_msg)
         return []
 
 def get_most_relevant_module(relevant_segments, query="", module_videos=None, response_text=None):
@@ -793,9 +994,19 @@ def get_most_relevant_module(relevant_segments, query="", module_videos=None, re
 
 # Function to generate a response with Claude
 def generate_response(query, relevant_segments, conversation_history=None, module_videos=None):
+    """Generate a response using the Claude API with rate limiting and error handling"""
+    # Check rate limits first
+    rate_limit_ok, rate_limit_msg = rate_limiter.check_rate_limit()
+    if not rate_limit_ok:
+        logger.warning(f"Rate limit exceeded: {rate_limit_msg}")
+        return f"Sorry, {rate_limit_msg}"
+        
     if anthropic_client is None:
-        st.error("Claude API connection not available")
+        logger.error("Claude API connection not available")
         return "Sorry, we cannot generate a response at this time due to API connection issues."
+    
+    # Sanitize the query for security
+    sanitized_query = sanitize_input(query)
     
     if not relevant_segments:
         prompt = f"""
@@ -803,7 +1014,7 @@ def generate_response(query, relevant_segments, conversation_history=None, modul
         segments in the transcripts. Please respond politely that you don't have specific information 
         on this topic from the course materials.
         
-        User question: {query}
+        User question: {sanitized_query}
         """
         
         system_message = """Within the present role of extremely skilled facilitator and certified teacher of the Foundations course, please draw primarily on the course segments to provide a conversational answer to the query that is privy to the full complexity of connections that the asker is making (with the extreme skill of a lacanian analyst with decades of clinical experience and training in coherence therapy), and that is offering an attuned synthesis of relevent course segments to respond to the heart of the inquiry. In dialogue, you use a transference-focused psychotherapy (TFP) lens to inform your dynamically updated object-relations based treatment model, staying flexible to when intuition and art are required, and guide the user towards transformative improvement. Do not explain theory unless necessary, assume the client is well-versed and will ask questions if they don't understand. Don't mention names of techniques if unnecessary. Do not use lists. Speak conversationally. Do not speak like a blog post or wikipedia entry. Be economical in your speech. Center your sensemaking around concepts from the segments, and cite these appropriately.
@@ -815,8 +1026,13 @@ Keep your response concise and focused - maximum 3 paragraphs. Be efficient with
 Include appropriate academic citations for parts of your answer that draw on the course transcript segments. Use superscript numbers (e.g., This concept¹) and include a numbered reference list at the end of your response."""
         
         try:
+            # Log API calls in debug mode
+            if debug_mode:
+                st.sidebar.write("Making API call to Claude (no segments found)")
+                
+            # Attempt with primary model first
             completion = anthropic_client.messages.create(
-                model="claude-3-7-sonnet-20250219",
+                model=CONFIG["models"]["primary"],
                 max_tokens=800,
                 temperature=0.3,
                 system=system_message,
@@ -826,9 +1042,14 @@ Include appropriate academic citations for parts of your answer that draw on the
             )
             return completion.content[0].text
         except Exception as e:
+            logger.error(f"Error with primary model: {e}")
             try:
+                if debug_mode:
+                    st.sidebar.write("Falling back to secondary model")
+                    
+                # Fall back to secondary model
                 completion = anthropic_client.messages.create(
-                    model="claude-3-opus-20240229",
+                    model=CONFIG["models"]["fallback"],
                     max_tokens=800,
                     temperature=0.3,
                     system=system_message,
@@ -838,99 +1059,8 @@ Include appropriate academic citations for parts of your answer that draw on the
                 )
                 return completion.content[0].text
             except Exception as fallback_error:
-                st.error(f"Error generating response with fallback model: {fallback_error}")
+                logger.error(f"Error generating response with fallback model: {fallback_error}")
                 return f"We encountered an error while generating a response. Please try again later."
-    
-    context = ""
-    citation_references = {}
-    citation_count = 1
-    
-    for i, segment in enumerate(relevant_segments):
-        segment_id = segment.get('segment_id', f"segment_{i+1}")
-        segment_title = segment.get('title', 'Untitled')
-        citation_references[citation_count] = format_citation(segment_id, segment_title, segment.get('session_type', 'Unknown'), module_videos)
-        
-        context += f"--- Segment {i+1} (Citation {citation_count}) ---\n"
-        context += f"Title: {segment_title}\n"
-        context += f"Session: {segment['session_title']} (Segment {segment['segment_number']})\n"
-        context += f"Segment ID: {segment_id}\n"
-        context += f"Content: {segment['content']}\n\n"
-        
-        citation_count += 1
-    
-    citation_list = "\n".join([f"{i}. {ref}" for i, ref in citation_references.items()])
-    
-    conversation_context = ""
-    if conversation_history and len(conversation_history) > 0:
-        conversation_context = "Previous conversation:\n"
-        for i, message in enumerate(conversation_history):
-            if message["role"] == "user":
-                conversation_context += f"User: {message['content']}\n"
-            else:
-                conversation_context += f"Assistant: {message['content']}\n"
-        conversation_context += "\n"
-    
-    prompt = f"""
-    You are answering a question about the Movement of Existence (MoE) Foundations course.
-    
-    {conversation_context}
-    
-    I'll provide you with relevant segments from the course transcripts. 
-    Use this information to answer the question. While focusing primarily on these transcripts, 
-    you can also draw upon your understanding of coherence therapy and transference-focused psychotherapy (TFP)
-    when appropriate.
-    
-    When answering follow-up questions, don't repeat exact phrases or explanations from your previous responses.
-    Express the same concepts in different words if needed.
-    
-    Here are the relevant segments from the course transcripts:
-    
-    {context}
-    
-    When you reference information from the segments in your answer, use superscript citation numbers 
-    (like this¹) and include the following numbered references at the end of your response. Put each citation on its own line:
-    
-    {citation_list}
-    
-    Based primarily on these segments, please answer the following question:
-    
-    {query}
-    """
-    
-    system_message = """Within the present role of extremely skilled facilitator and certified teacher of the Foundations course, please draw primarily on the course segments to provide a conversational answer to the query that is privy to the full complexity of connections that the asker is making (with the extreme skill of a lacanian analyst with decades of clinical experience and training in coherence therapy), and that is offering an attuned synthesis of relevent course segments to respond to the heart of the inquiry. In dialogue, you use a transference-focused psychotherapy (TFP) lens to inform your dynamically updated object-relations based treatment model, staying flexible to when intuition and art are required, and guide the user towards transformative improvement. Do not explain theory unless necessary, assume the client is well-versed and will ask questions if they don't understand. Don't mention names of techniques if unnecessary. Do not use lists. Speak conversationally. Do not speak like a blog post or wikipedia entry. Be economical in your speech. Center your sensemaking around concepts from the segments, and cite these appropriately.
-
-Never use "I" when referring to yourself. Instead, use "we" when necessary.
-
-Keep your response concise and focused - maximum 3 paragraphs. Be efficient with words while fully addressing the question.
-
-Include appropriate academic citations for parts of your answer that draw on the course transcript segments. Use superscript numbers (e.g., This concept¹) and include a numbered reference list at the end of your response."""
-    
-    try:
-        completion = anthropic_client.messages.create(
-            model="claude-3-7-sonnet-20250219",
-            max_tokens=800,
-            temperature=0.3,
-            system=system_message,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return completion.content[0].text
-    except Exception as e:
-        try:
-            completion = anthropic_client.messages.create(
-                model="claude-3-opus-20240229",
-                max_tokens=800,
-                temperature=0.3,
-                system=system_message,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return completion.content[0].text
-        except Exception as fallback_error:
-            st.error(f"Error generating response with fallback model: {fallback_error}")
-            return f"We encountered an error while generating a response. Please try again later."
 
 # Initialize session state
 if "conversation" not in st.session_state:
@@ -963,6 +1093,7 @@ index, segments_metadata, vectorizer, module_videos = None, None, None, {}
 # Load resources
 try:
     if "resources_loaded" not in st.session_state:
+        # Load with the secure functions
         index, segments_metadata, vectorizer = load_faiss_resources()
         module_videos = load_module_videos()
         
@@ -973,21 +1104,28 @@ try:
             st.session_state.vectorizer = vectorizer
             st.session_state.module_videos = module_videos
             st.session_state.resources_loaded = True
+            
+            if debug_mode:
+                st.sidebar.write("Resources loaded successfully and saved to session state")
     else:
         # Retrieve from session state
         index = st.session_state.index
         segments_metadata = st.session_state.segments_metadata
         vectorizer = st.session_state.vectorizer
-        index = st.session_state.index
-        segments_metadata = st.session_state.segments_metadata
-        vectorizer = st.session_state.vectorizer
         module_videos = st.session_state.module_videos
+        
+        if debug_mode:
+            st.sidebar.write("Resources retrieved from session state")
 except Exception as e:
-    st.error(f"Error loading resources: {e}")
+    error_msg = f"Error loading resources: {e}"
+    logger.error(error_msg)
+    st.error(error_msg)
 
 # Display current question and response
 if st.session_state.current_query and st.session_state.current_response:
-    st.markdown(f'<div class="message-container"><div class="user-message">{st.session_state.current_query}</div></div>', unsafe_allow_html=True)
+    # Display sanitized query for security
+    sanitized_query = sanitize_input(st.session_state.current_query)
+    st.markdown(f'<div class="message-container"><div class="user-message">{sanitized_query}</div></div>', unsafe_allow_html=True)
     
     # Format citations in the response
     formatted_response = format_citations_html(st.session_state.current_response)
@@ -1048,45 +1186,161 @@ else:
 
 # Process the query when submitted
 if submit_button and query:
-    # Store the current query
-    st.session_state.current_query = query
+    # Apply rate limiting
+    rate_limit_ok, rate_limit_msg = rate_limiter.check_rate_limit()
+    if not rate_limit_ok:
+        st.warning(rate_limit_msg)
+    else:
+        # Sanitize input for security
+        sanitized_query = sanitize_input(query)
+        
+        # Store the current query (sanitized)
+        st.session_state.current_query = sanitized_query
+        
+        # Set in_chat state to true
+        st.session_state.in_chat = True
+        
+        # Add to conversation history (with sanitized query)
+        st.session_state.conversation.append({"role": "user", "content": sanitized_query})
+        
+        # Display loading state
+        loading_placeholder = st.empty()
+        loading_placeholder.markdown('<div class="loading-indicator">Checking archives...</div>', unsafe_allow_html=True)
+        
+        # Search for relevant segments
+        relevant_segments = []
+        if index is not None and segments_metadata is not None and vectorizer is not None:
+            relevant_segments = search_segments(sanitized_query, index, segments_metadata, vectorizer)
+        
+        # Get relevant conversation history
+        conversation_history = st.session_state.conversation[:-1] if len(st.session_state.conversation) > 1 else None
+        
+        # Generate response
+        response = generate_response(sanitized_query, relevant_segments, conversation_history, module_videos)
+        
+        # Determine most relevant module - PASS THE RESPONSE TEXT HERE
+        most_relevant_module = get_most_relevant_module(relevant_segments, sanitized_query, module_videos, response)
+        
+        # Debug logging
+        if debug_mode:
+            st.sidebar.write(f"Selected module: {most_relevant_module}")
+        
+        # Store results in session state
+        st.session_state.current_response = response
+        st.session_state.current_module = most_relevant_module
+        
+        # Add assistant response to conversation history
+        st.session_state.conversation.append({"role": "assistant", "content": response})
+        
+        # Log conversation if enabled
+        logger.info(f"Processed query: {sanitized_query[:50]}{'...' if len(sanitized_query) > 50 else ''}")
+        
+        # Clear loading state
+        loading_placeholder.empty()
+        
+        # Rerun to update UI
+        st.rerun()
     
-    # Set in_chat state to true
-    st.session_state.in_chat = True
+    context = ""
+    citation_references = {}
+    citation_count = 1
     
-    # Add to conversation history
-    st.session_state.conversation.append({"role": "user", "content": query})
+    for i, segment in enumerate(relevant_segments):
+        segment_id = segment.get('segment_id', f"segment_{i+1}")
+        segment_title = segment.get('title', 'Untitled')
+        citation_references[citation_count] = format_citation(segment_id, segment_title, segment.get('session_type', 'Unknown'), module_videos)
+        
+        context += f"--- Segment {i+1} (Citation {citation_count}) ---\n"
+        context += f"Title: {segment_title}\n"
+        context += f"Session: {segment['session_title']} (Segment {segment['segment_number']})\n"
+        context += f"Segment ID: {segment_id}\n"
+        context += f"Content: {segment['content']}\n\n"
+        
+        citation_count += 1
     
-    # Display loading state
-    loading_placeholder = st.empty()
-    loading_placeholder.markdown('<div class="loading-indicator">Checking archives...</div>', unsafe_allow_html=True)
+    citation_list = "\n".join([f"{i}. {ref}" for i, ref in citation_references.items()])
     
-    # Search for relevant segments
-    relevant_segments = []
-    if index is not None and segments_metadata is not None and vectorizer is not None:
-        relevant_segments = search_segments(query, index, segments_metadata, vectorizer)
+    # Process conversation history with sanitization if it exists
+    conversation_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        conversation_context = "Previous conversation:\n"
+        for i, message in enumerate(conversation_history):
+            if message["role"] == "user":
+                # Sanitize historical user messages
+                sanitized_content = sanitize_input(message['content'])
+                conversation_context += f"User: {sanitized_content}\n"
+            else:
+                conversation_context += f"Assistant: {message['content']}\n"
+        conversation_context += "\n"
     
-    # Get relevant conversation history
-    conversation_history = st.session_state.conversation[:-1] if len(st.session_state.conversation) > 1 else None
+    prompt = f"""
+    You are answering a question about the Movement of Existence (MoE) Foundations course.
     
-    # Generate response
-    response = generate_response(query, relevant_segments, conversation_history, module_videos)
+    {conversation_context}
     
-    # Determine most relevant module - PASS THE RESPONSE TEXT HERE
-    most_relevant_module = get_most_relevant_module(relevant_segments, query, module_videos, response)
+    I'll provide you with relevant segments from the course transcripts. 
+    Use this information to answer the question. While focusing primarily on these transcripts, 
+    you can also draw upon your understanding of coherence therapy and transference-focused psychotherapy (TFP)
+    when appropriate.
     
-    # Debug logging
-    print(f"Selected module: {most_relevant_module}")
+    When answering follow-up questions, don't repeat exact phrases or explanations from your previous responses.
+    Express the same concepts in different words if needed.
     
-    # Store results in session state
-    st.session_state.current_response = response
-    st.session_state.current_module = most_relevant_module
+    Here are the relevant segments from the course transcripts:
     
-    # Add assistant response to conversation history
-    st.session_state.conversation.append({"role": "assistant", "content": response})
+    {context}
     
-    # Clear loading state
-    loading_placeholder.empty()
+    When you reference information from the segments in your answer, use superscript citation numbers 
+    (like this¹) and include the following numbered references at the end of your response. Put each citation on its own line:
     
-    # Rerun to update UI
-    st.rerun()
+    {citation_list}
+    
+    Based primarily on these segments, please answer the following question:
+    
+    {sanitized_query}
+    """
+    
+    system_message = """Within the present role of extremely skilled facilitator and certified teacher of the Foundations course, please draw primarily on the course segments to provide a conversational answer to the query that is privy to the full complexity of connections that the asker is making (with the extreme skill of a lacanian analyst with decades of clinical experience and training in coherence therapy), and that is offering an attuned synthesis of relevent course segments to respond to the heart of the inquiry. In dialogue, you use a transference-focused psychotherapy (TFP) lens to inform your dynamically updated object-relations based treatment model, staying flexible to when intuition and art are required, and guide the user towards transformative improvement. Do not explain theory unless necessary, assume the client is well-versed and will ask questions if they don't understand. Don't mention names of techniques if unnecessary. Do not use lists. Speak conversationally. Do not speak like a blog post or wikipedia entry. Be economical in your speech. Center your sensemaking around concepts from the segments, and cite these appropriately.
+
+Never use "I" when referring to yourself. Instead, use "we" when necessary.
+
+Keep your response concise and focused - maximum 3 paragraphs. Be efficient with words while fully addressing the question.
+
+Include appropriate academic citations for parts of your answer that draw on the course transcript segments. Use superscript numbers (e.g., This concept¹) and include a numbered reference list at the end of your response."""
+    
+    try:
+        # Log API calls in debug mode
+        if debug_mode:
+            st.sidebar.write(f"Making API call to Claude with {len(relevant_segments)} segments")
+            
+        # Try primary model first
+        completion = anthropic_client.messages.create(
+            model=CONFIG["models"]["primary"],
+            max_tokens=800,
+            temperature=0.3,
+            system=system_message,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return completion.content[0].text
+    except Exception as e:
+        logger.error(f"Error with primary model: {e}")
+        try:
+            if debug_mode:
+                st.sidebar.write("Falling back to secondary model")
+                
+            # Fall back to secondary model
+            completion = anthropic_client.messages.create(
+                model=CONFIG["models"]["fallback"],
+                max_tokens=800,
+                temperature=0.3,
+                system=system_message,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return completion.content[0].text
+        except Exception as fallback_error:
+            logger.error(f"Error generating response with fallback model: {fallback_error}")
+            return f"We encountered an error while generating a response. Please try again later."
