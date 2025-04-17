@@ -4,3 +4,4 @@ faiss-cpu
 numpy
 scikit-learn
 python-dotenv
+bleach
