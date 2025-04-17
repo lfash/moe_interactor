@@ -1344,3 +1344,6 @@ Include appropriate academic citations for parts of your answer that draw on the
         except Exception as fallback_error:
             logger.error(f"Error generating response with fallback model: {fallback_error}")
             return f"We encountered an error while generating a response. Please try again later."
+
+# Main application code
+# Initialize session state
